@@ -5,7 +5,7 @@ import pandas as pd
 import pyarrow as pa
 #import pyarrow.hdfs as hdfs
 import pyarrow.filesystem as fs
-
+import os
 # from sqlalchemy.sql import text
 # from sqlalchemy.exc import OperationalError 
 # from sqlalchemy.exc import SQLAlchemyError
@@ -39,7 +39,7 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
                        PWD=1qaz!2wsx@;;TrustServerCertificate=yes;\
                        database=CQCAnalyzer;") as con:
    
-            fquery1 = (f"""WITH CTE AS ( SELECT B.BatchID, B.BatchName, B.BatchPath, B.ConfigID, B.Shift, B.Cell_Name, B.TestTypeID,
+            fquery1 = (f"""WITH CTE AS ( SELECT B.BatchID , B.BatchName, B.BatchPath, B.ConfigID, B.Shift, B.Cell_Name, B.TestTypeID,
                                    B.LastInsertedRow, B.StartTime, B.Heads, B.BatteryTypeID, B.BodyTypeID, B.DomeTypeID,
                                    B.PCATypeID, B.PCBTypeID, B.PlacementContractorID, B.EmployeID, B.OpticsTypeID,
                                    B.Versions, B.LotNumber, B.SubLot, TP.TestID, TP.Capsule_Number,
@@ -97,12 +97,14 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
         return pd.DataFrame()
 
 if __name__ == '__main__':
-
+    print("sql.py main ")
     json_path = "/home/naya/anomaly/files_json/scd_raw.json"
 
 
-    scd_raw = fetch_sealing_data(year=2022, quarter=None, month=None, yearweek=None, weekday=None, configs_id=917)
+    if not os.path.isfile(json_path):
+        scd_raw = fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=22, weekday=5, configs_id=917)
     # Rename the duplicate column
-    scd_raw.columns = ['_BatchID' if col == 'BatchID' else col for col in scd_raw.columns]
-    print(scd_raw)
-    scd_raw.to_json(json_path)
+        scd_raw.columns = ['_BatchID' if col == 'BatchID' else col for col in scd_raw.columns]
+        print(scd_raw.head(5))
+        scd_raw.to_json(json_path)
+
