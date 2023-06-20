@@ -11,7 +11,7 @@ renamed_json_path = "/home/naya/anomaly/files_json/scd_raw_read.json"
 host = 'cnt7-naya-cdh63'
 port = '9092'
 bootstrap_servers = f'{host}:{port}' 
-topic = 'kafka-tst-01'
+topic = 'get_sealing_raw_data'
 
 def trigger_fetch_and_produce():
     current_time = datetime.now()
@@ -31,17 +31,20 @@ def trigger_fetch_and_produce():
         scd_raw = fetch_sealing_data(year, quarter, month, yearweek, weekday, configs_id)
         print(f"Fetching from new file, {len(scd_raw)}")
     
-    # Convert DataFrame to JSON string
-    scd_raw_json = scd_raw.to_json(orient='records')
+    # # Convert DataFrame to JSON string
+    # scd_raw_json = scd_raw.to_json(orient='records')
 
     # Initialize Kafka producer
     producer = KafkaProducer(bootstrap_servers=bootstrap_servers)
 
-    # Produce the sealing data to Kafka
-    producer.send(topic, value=scd_raw_json.encode('utf-8'))
-
-    # Flush and close the Kafka producer
-    producer.flush()
+    # Iterate over each record and produce it to Kafka
+    for _, record in scd_raw.iterrows():
+        # Convert record to JSON string
+        record_json = record.to_json()
+        # Produce the record to Kafka
+        producer.send(topic, value=record_json.encode('utf-8'))
+        # Flush and close the Kafka producer
+        producer.flush()
     producer.close()
 
 # Trigger the fetch and produce function

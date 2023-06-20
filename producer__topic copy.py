@@ -8,7 +8,7 @@ local_path_anomaly_output = "/home/naya/anomaly/files_json/scd_anomaly.json"
 local_path_weeks_raws_output = "/home/naya/anomaly/files_json/scd_weeks_raws.json"
 
 # Create a SparkSession
-spark = SparkSession.builder.appName("Local_write_and_query").getOrCreate()
+spark = SparkSession.builder.appName("get_sealing_raw_data").getOrCreate()
 
 def spark_refine(df):
     try:
@@ -109,10 +109,21 @@ def spark_weekly_rows(df):
 
 if __name__ == '__main__':
     try:
-        # Kafka configuration
-        bootstrap_servers = 'cnt7-naya-cdh63:9092'
-        topic = 'sealing_data_topic'
-        group_id = 'consumer_group'
+        topic = 'kafka-tst-01'
+        group_id = 'consumer_group2'
+        enable_auto_commit=True,
+        auto_commit_interval_ms=5000,
+        auto_offset_reset='earliest',
+        value_deserializer=lambda x: x.decode('utf-8')
+
+        # Create the Kafka consumer
+        consumer = KafkaConsumer(topic, bootstrap_servers=bootstrap_servers, group_id=group_id)
+
+        # Read and print messages from the Kafka topic
+        i=0
+        for message in consumer:
+            i=i+1
+            print(f"Received message: {message.value}, {i}")
 
         # Create the Kafka consumers
         consumer1 = KafkaConsumer(topic, bootstrap_servers=bootstrap_servers, group_id=group_id)
