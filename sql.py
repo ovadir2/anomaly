@@ -1,13 +1,24 @@
-#configs_id for sealingcell is '917'
-def fetch_sealing_data(year, quarter=None, month=None, yearweek=None, weekday=None, configs_id=917):
-    # SQL server connection
-    params = urllib.parse.quote_plus("DRIVER={SQL Server Native Client 11.0};"
-                                     "SERVER=LTD-BRAVO;"
-                                     "DATABASE=CQCAnalyzer;"
-                                     "UID=ovadir2;"
-                                     "PWD=1qaz!2wsx@")
+import pandas as pd
+# import urllib
+# import urllib.parse
+# import sqlalchemy as sa
+import pyarrow as pa
+#import pyarrow.hdfs as hdfs
+import pyarrow.filesystem as fs
 
-    engine = sa.create_engine("mssql+pyodbc:///?odbc_connect={}".format(params))
+# from sqlalchemy.sql import text
+# from sqlalchemy.exc import OperationalError 
+# from sqlalchemy.exc import SQLAlchemyError
+import pyodbc
+# from pyspark.sql.functions import current_timestamp
+# #from sqlalchemy import create_engine
+# #from  append_hdfs_parquet import append_hdfs_parquet
+import io
+  
+#configs_id for sealingcell is '917'
+def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekday=None, configs_id=917):
+    
+   
     _filter =''
     if quarter:
         _filter = f' AND quarter = {quarter}'
@@ -23,8 +34,11 @@ def fetch_sealing_data(year, quarter=None, month=None, yearweek=None, weekday=No
          
     #print(f'filter is: {_filter}')
     try:
-        with engine.connect() as con:
-  
+       with  pyodbc.connect("DRIVER={ODBC Driver 18 for SQL Server};\
+                       server=10.247.232.23,1433;UID=ovadir2;\
+                       PWD=1qaz!2wsx@;;TrustServerCertificate=yes;\
+                       database=CQCAnalyzer;") as con:
+   
             fquery1 = (f"""WITH CTE AS ( SELECT B.BatchID, B.BatchName, B.BatchPath, B.ConfigID, B.Shift, B.Cell_Name, B.TestTypeID,
                                    B.LastInsertedRow, B.StartTime, B.Heads, B.BatteryTypeID, B.BodyTypeID, B.DomeTypeID,
                                    B.PCATypeID, B.PCBTypeID, B.PlacementContractorID, B.EmployeID, B.OpticsTypeID,
@@ -41,7 +55,10 @@ def fetch_sealing_data(year, quarter=None, month=None, yearweek=None, weekday=No
                                    DATEPART(DW, CONVERT(DATE, TP.Date, 103)) AS dayweek 
                                     FROM dbo.Batch AS B
                                     JOIN dbo.TestProperty AS TP ON B.BatchID = TP.BatchID
-                                    JOIN SealingCell AS SC ON TP.TestID = SC.TestID
+                                    JOIN SealingCell AS SC ON 
+                       
+                       
+                       TP.TestID = SC.TestID
                                     WHERE B.ConfigID = {configs_id} )
             
                                     SELECT CTE.*,
@@ -67,7 +84,7 @@ def fetch_sealing_data(year, quarter=None, month=None, yearweek=None, weekday=No
                                         WHERE scl.BatchId = CTE.BatchID) AS limits
                                     WHERE year = {year} {_filter} ;""")
             
-            df = pd.read_sql(text(fquery1), con)
+            df = pd.read_sql(fquery1, con)
              
 
             # print('=======================================')
@@ -75,7 +92,17 @@ def fetch_sealing_data(year, quarter=None, month=None, yearweek=None, weekday=No
             # print('=======================================')
             return df
 
-    except (sa.exc.SQLAlchemyError, sa.exc.OperationalError , pyodbc.OperationalError) as error:
+    except (pyodbc.OperationalError) as error:
         print(f"Error connecting to SQL Server Bravo: {error}")
         return pd.DataFrame()
-                                              
+
+if __name__ == '__main__':
+
+    json_path = "/home/naya/anomaly/files_json/scd_raw.json"
+
+
+    scd_raw = fetch_sealing_data(year=2022, quarter=None, month=None, yearweek=None, weekday=None, configs_id=917)
+    # Rename the duplicate column
+    scd_raw.columns = ['_BatchID' if col == 'BatchID' else col for col in scd_raw.columns]
+    print(scd_raw)
+    scd_raw.to_json(json_path)
