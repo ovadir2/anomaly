@@ -3,9 +3,9 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType, StringType, StructType, StructField
 
 # Local paths
-local_path_refine_output = "/home/naya/anomaly/anomaly/sealing_anomaly/scd_refine.parquet"
-local_path_anomaly_output = "/home/naya/anomaly/anomaly/sealing_anomaly/scd_anomaly.parquet"
-local_path_weeks_raws_output = "/home/naya/anomaly/anomaly/sealing_anomaly/scd_weeks_raws.parquet"
+local_path_refine_output = "/home/naya/anomaly/files_parquet/scd_refine.parquet"
+local_path_anomaly_output = "/home/naya/anomaly/files_parquet/scd_anomaly.parquet"
+local_path_weeks_raws_output = "/home/naya/anomaly/files_parquet/scd_weeks_raws.parquet"
 
 def spark_refine(df):
     try:

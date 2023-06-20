@@ -1,3 +1,15 @@
+#import streamlit as st
+from sklearn.ensemble import IsolationForest
+import pyarrow.parquet as pq
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import math
+
+
 def check_anomalies(scd_anomaly, contamination=0.05, n_estimators=100):
     # Adjust the contamination value and number of estimators
     isolation_forest = IsolationForest(contamination=contamination, n_estimators=n_estimators)
@@ -100,12 +112,10 @@ def plot_spc_trend(df, feature,  hi_limit=None, lo_limit=None, hi_value=None, lo
     return df
 if __name__ == '__main__':
 
-    parquet_path = "/home/naya/anomaly/files_parquet/scd_raw.parquet"
-
-    scd_anomaly_check = pd.DataFrame()
+    parquet_path = "/home/naya/anomaly/files_parquet/scd_anomaly.parquet"
     scd_anomaly_check= check_anomalies(scd_anomaly, contamination=0.05, n_estimators=100);
     scd_anomaly_check.to_parquet('./files_parquet/scd_anomaly_check.parquet', engine='pyarrow')
-    scd_only_anomaly = scd_anomaly[scd_anomaly['anomaly'] == -1]
+    scd_only_anomaly = scd_anomaly[scd_anomaly_check['anomaly'] == -1]
     scd_only_anomaly.to_parquet('./files_parquet/scd_only_anomaly.parquet', engine='pyarrow')
 
 
