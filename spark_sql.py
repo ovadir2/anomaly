@@ -2,6 +2,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 # Local paths
+json_path = "/home/naya/anomaly/files_json/scd_raw.json"
 local_path_refine_output = "/home/naya/anomaly/files_json/scd_refine.json"
 local_path_anomaly_output = "/home/naya/anomaly/files_json/scd_anomaly.json"
 local_path_weeks_raws_output = "/home/naya/anomaly/files_json/scd_weeks_raws.json"
@@ -119,9 +120,20 @@ def spark_weekly_rows(df):
 
 
 if __name__ == '__main__':
+    import pandas as pd
+    import os
+    import sql 
+
     try:
         # Read raw DataFrame from JSON file
-        scd_raw = spark.read.json('/home/naya/anomaly/files_json/scd_raw.json').toPandas()
+        if os.path.isfile(json_path):
+            scd_raw = pd.read_json(json_path)
+            print(f"Reading from existing file, {len(scd_raw)}")
+        else:
+            #print(year, quarter, month, yearweek, weekday, configs_id)
+            scd_raw = sql.fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=22, weekday=5, configs_id=917)
+        print(f"Fetching from new file, {len(scd_raw)}")
+
         print(scd_raw.head())
 
         success_refine = spark_refine(scd_raw)
