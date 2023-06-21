@@ -3,7 +3,7 @@ from kafka import KafkaConsumer
 host = 'cnt7-naya-cdh63'
 port = '9092'
 bootstrap_servers = f'{host}:{port}' 
-topic = 'kafka-tst-01'
+topic = 'get_sealing_raw_data'
 group_id = 'consumer_group2'
 enable_auto_commit=True,
 auto_commit_interval_ms=5000,

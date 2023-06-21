@@ -90,6 +90,12 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
             # print('=======================================')
             # print(' LTD_BRAVO stations data......completed')
             # print('=======================================')
+ 
+            json_path = "/home/naya/anomaly/files_json/scd_raw.json"
+            df.columns = ['_BatchID' if col == 'BatchID' else col for col in df.columns]
+            df.to_json(json_path)
+            print(df.head(5))
+        
             return df
 
     except (pyodbc.OperationalError) as error:
@@ -97,14 +103,7 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
         return pd.DataFrame()
 
 if __name__ == '__main__':
+    scd_raw = fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=22, weekday=5, configs_id=917)
     print("sql.py main ")
-    json_path = "/home/naya/anomaly/files_json/scd_raw.json"
-
-
-    if not os.path.isfile(json_path):
-        scd_raw = fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=22, weekday=5, configs_id=917)
-    # Rename the duplicate column
-        scd_raw.columns = ['_BatchID' if col == 'BatchID' else col for col in scd_raw.columns]
-        print(scd_raw.head(5))
-        scd_raw.to_json(json_path)
+ 
 

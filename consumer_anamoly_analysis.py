@@ -9,7 +9,30 @@ import matplotlib.pyplot as plt
 import os
 import math
 
+def spark_anomaly(df):
+    try:
+        # Convert Pandas DataFrame to Spark DataFrame
+        spark_df = spark.createDataFrame(df)
 
+        # Drop unnecessary columns
+        remove_col = [
+            'blister_id', 'date', 'domecasegap_limit', 'domecasegap_spc', 'stitcharea_limit', 'stitcharea_spc',
+            'leaktest', 'laserpower', 'minstitchwidth', '_batchid'
+        ]
+        spark_df = spark_df.drop(*remove_col)
+
+        # Handle missing values by replacing them with a specific value (-999)
+        spark_df = spark_df.fillna(-999)
+
+        # Save anomaly DataFrame as JSON file locally
+        spark_df.write.json(local_path_anomaly_output)
+
+        return True
+    except Exception as e:
+        print(f"An error occurred in spark_anomaly: {str(e)}")
+        return False
+    
+    
 def check_anomalies(scd_anomaly, contamination=0.05, n_estimators=100):
     # Adjust the contamination value and number of estimators
     isolation_forest = IsolationForest(contamination=contamination, n_estimators=n_estimators)
