@@ -2,6 +2,7 @@
 docker_image/
 files_json/
 files_parquet/
+naya-de/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
