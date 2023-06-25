@@ -4,10 +4,10 @@ from pyspark.sql.types import IntegerType
 import pyarrow as pa
 
 # Local paths
-json_path = "/home/naya/anomaly/files_json/scd_raw.json"
-# local_path_refine_output = "file://home/naya/anomaly/files_json/scd_refine.json"
-# local_path_anomaly_output = "file://home/naya/anomaly/files_json/scd_anomaly.json"
-# local_path_weeks_raws_output = "file://home/naya/anomaly/files_json/scd_weeks_raws.json"
+csv_path = "/home/naya/anomaly/files_csv/scd_raw.csv"
+# local_path_refine_output = "file://home/naya/anomaly/files_csv/scd_refine.csv"
+# local_path_anomaly_output = "file://home/naya/anomaly/files_csv/scd_anomaly.csv"
+# local_path_weeks_raws_output = "file://home/naya/anomaly/files_csv/scd_weeks_raws.csv"
 
 
 fs = pa.hdfs.HadoopFileSystem(
@@ -17,13 +17,15 @@ fs = pa.hdfs.HadoopFileSystem(
     kerb_ticket=None,
     extra_conf=None)
 
-def spark_refine(df):
+def spark_refine():
     try:
        # Create a SparkSession
         spark = SparkSession.builder.appName("SCD_Refining").getOrCreate()
+        spark_df = spark.read.csv(csv_path, header=True, inferSchema=True)
+        spark_df.show(5)
 
         # Convert pandas DataFrame to Spark DataFrame
-        spark_df = spark.createDataFrame(df)
+        #spark_df = spark.createDataFrame(df)
 
         # Generate a unique file name using the UNIX timestamp
         spark_df = spark_df.toDF(*[col.lower() for col in spark_df.columns])
@@ -54,9 +56,8 @@ def spark_refine(df):
         #spark_df.write.json(local_path_refine_output)
         # Append the DataFrame to the destination file
         #spark_df.write.mode('append').csv('/user/hive/warehouse/scd_raw_db/scd_raw.csv')
-
+      
         spark.stop()
-
         return spark_df
     
     except Exception as e:
@@ -120,18 +121,10 @@ if __name__ == "__main__":
         df= pd.DataFrame()
         # Refine the data
         refined_df = spark_refine(df)
-       # Read JSON file into Pandas DataFrame
-        df = pd.read_json(json_path)
-        fs.chmod('hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly', 775)
-
-        # Change access permissions for a file in the staging directory in order
-        # to allow for naya user to get this file only
-        fs.chown('hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly', owner='naya', group='naya')
-
+       
         if refined_df is not None:
             print("Data refinement completed successfully!")
-            #refined_df.write.format("csv").option("header", "true").mode("overwrite").save('hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/refined_df.csv')
-            refined_df.write.format("json").mode("append").save('hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/refined_df.json')
+            refined_df.write.format("csv").mode("append").save('hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/refined_df.json')
         else:
             print("Data refinement failed!")
 
