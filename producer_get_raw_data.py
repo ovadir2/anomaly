@@ -44,6 +44,7 @@ def trigger_fetch_and_produce():
 
     # Initialize Kafka producer
     producer = KafkaProducer(bootstrap_servers=bootstrap_servers)
+
     if file_size != 0:
         producer.send(topic, value=f'file_size:{file_size}'.encode('utf-8'))
     # Iterate over each record and produce it to Kafka
