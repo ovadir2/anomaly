@@ -2,12 +2,14 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType
 import pyarrow as pa
+import os
 
 # Local paths
 csv_path = "/home/naya/anomaly/files_csv/scd_raw.csv"
-# local_path_refine_output = "file://home/naya/anomaly/files_csv/scd_refine.csv"
-# local_path_anomaly_output = "file://home/naya/anomaly/files_csv/scd_anomaly.csv"
-# local_path_weeks_raws_output = "file://home/naya/anomaly/files_csv/scd_weeks_raws.csv"
+json_path = "/home/naya/anomaly/files_json/scd_raw.json"
+local_path_refine_output = "/home/naya/anomaly/files_json/scd_refine.json"
+local_path_anomaly_output = "/home/naya/anomaly/files_json/scd_anomaly.json"
+local_path_weeks_raws_output = "/home/naya/anomaly/files_json/scd_weeks_raws.json"
 
 
 fs = pa.hdfs.HadoopFileSystem(
@@ -17,15 +19,22 @@ fs = pa.hdfs.HadoopFileSystem(
     kerb_ticket=None,
     extra_conf=None)
 
-def spark_refine():
+def spark_refine(spark_df):
     try:
        # Create a SparkSession
-        spark = SparkSession.builder.appName("SCD_Refining").getOrCreate()
-        spark_df = spark.read.csv(csv_path, header=True, inferSchema=True)
-        spark_df.show(5)
-
+        #spark = SparkSession.builder.appName("SCD_Refining").getOrCreate()
+        spark = SparkSession.builder \
+            .appName("SCD_Refining") \
+            .config("spark.executor.memory", "4g") \
+            .config("spark.driver.memory", "4g") \
+            .config("spark.driver.maxResultSize", "2g") \
+            .getOrCreate()
         # Convert pandas DataFrame to Spark DataFrame
-        #spark_df = spark.createDataFrame(df)
+        spark_df = spark.createDataFrame(df)
+        
+         # Repartition the DataFrame to distribute the data evenly
+        spark_df = spark_df.repartition(1)  # Adjust the number of partitions as needed
+
 
         # Generate a unique file name using the UNIX timestamp
         spark_df = spark_df.toDF(*[col.lower() for col in spark_df.columns])
@@ -53,8 +62,17 @@ def spark_refine():
         spark_df = spark_df.select(columns_to_keep)
 
         # Save refined DataFrame as JSON file locally
-        #spark_df.write.json(local_path_refine_output)
-        # Append the DataFrame to the destination file
+        if os.path.exists(local_path_refine_output):
+            # Read the existing file as a DataFrame
+            #existing_df = spark.read.json(local_path_refine_output)
+
+            # Append the refined DataFrame to the existing file
+            #combined_df = existing_df.union(spark_df)
+            #combined_df.write.json(local_path_refine_output, mode="overwrite")
+            spark_df.write.json(local_path_refine_output, mode="overwrite")
+        else:
+            # Save the refined DataFrame as a new JSON file
+            spark_df.write.json(local_path_refine_output)        # Append the DataFrame to the destination file
         #spark_df.write.mode('append').csv('/user/hive/warehouse/scd_raw_db/scd_raw.csv')
       
         spark.stop()
@@ -118,13 +136,13 @@ def spark_refine():
 if __name__ == "__main__":
     import pandas as pd
     try:
-        df= pd.DataFrame()
+        df= pd.read_json(json_path)
         # Refine the data
         refined_df = spark_refine(df)
-       
         if refined_df is not None:
+            refined_df.show(5)
             print("Data refinement completed successfully!")
-            refined_df.write.format("csv").mode("append").save('hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/refined_df.json')
+         #   refined_df.write.format("json").mode("append").save('hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/refined_df.json')
         else:
             print("Data refinement failed!")
 

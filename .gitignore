@@ -1,6 +1,7 @@
 #visual code
 docker_image/
 files_json/
+files_csv/
 files_parquet/
 naya-de/
 
