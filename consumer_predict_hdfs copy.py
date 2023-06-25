@@ -1,24 +1,28 @@
 from kafka import KafkaConsumer
-import json
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import TimestampType
+import json
 import os
+
+json_path = "/home/naya/anomaly/files_json/scd_raw.json"
+renamed_json_path = "/home/naya/anomaly/files_json/scd_raw_read.json"
+local_path_refine_output = "/home/naya/anomaly/files_json/scd_refine.json"
 
 host = 'cnt7-naya-cdh63'
 port = '9092'
-bootstrap_servers = f'{host}:{port}' 
+bootstrap_servers = f'{host}:{port}'
 topic = 'get_sealing_raw_data'
-group_id = 'prepare_predict_HDFS' #'consumer_group2'
-enable_auto_commit=True,
-auto_commit_interval_ms=5000,
-auto_offset_reset='earliest',
-value_deserializer=lambda x: x.decode('utf-8')
-
-local_path_refine_output = "/home/naya/anomaly/files_json/scd_refine.json"
-
+group_id = 'prepare_predict_HDFS'
+enable_auto_commit = True
+auto_commit_interval_ms = 5000
+auto_offset_reset = 'earliest'
+value_deserializer = lambda x: x.decode('utf-8')
 
 
 def process_json_record(record):
     try:
+        print('#######################################################################################################################################')
         # Convert column names to lowercase
         record = record.toDF(*(c.lower() for c in record.columns))
 
@@ -54,15 +58,36 @@ def process_json_record(record):
         print(f"An error occurred while processing JSON record: {str(e)}")
         return None
 
-def process_record(record):
-    try:
-        # Create a SparkSession
-        spark = SparkSession.builder.getOrCreate()
 
+def process_kafka_messages(messages):
+    try:
+        # Concatenate the accumulated messages into a single JSON string
+        full_json = ''.join(messages)
+
+        # Split the full JSON string into individual records
+        record_strings = full_json.split('\n')
+
+        # Create a SparkSession
+        spark = SparkSession.builder.appName("KafkaMessageProcessor").getOrCreate()
+
+        # Process each individual JSON record
+        for record_string in record_strings:
+            try:
+                record = json.loads(record_string)
+                df = spark.createDataFrame([record])  # Convert JSON record to DataFrame
+
+                # Process the record
+                processed_df = process_json_record(df)
+                if processed_df is not None:
+                    print(f"processed_df: OK")
+            except json.JSONDecodeError as e:
+                print(f"Error parsing JSON record: {record_string}")
+            except Exception as e:
+                print(f"An error occurred while processing JSON record: {str(e)}")
         if os.path.exists(local_path_refine_output):
             # Read the existing file as a DataFrame
             read_record = spark.read.json(local_path_refine_output)
-            
+
             # Append the refined DataFrame to the existing file
             combined_record = record.union(read_record)
             if not combined_record.isEmpty():
@@ -71,9 +96,13 @@ def process_record(record):
             # Save the refined DataFrame as a new JSON file
             if not record.isEmpty():
                 record.write.json(local_path_refine_output)  # Append the DataFrame to the destination file
+                #record.show(5)
+
+        # Stop the SparkSession
+        spark.stop()
     except Exception as e:
-        # Handle any errors that occur during record processing
-        print(f"Error processing record: {record}. Error: {str(e)}")
+        print(f"An error occurred while processing Kafka messages: {str(e)}")
+
 
 def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, auto_offset_reset='earliest'):
     try:
@@ -92,32 +121,28 @@ def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, a
         messages = []
         file_size = 0
 
-        # Continuously consume messages from Kafka
+        # Read and process messages from the Kafka topic
         for message in consumer:
-            # Decode the message value
-            message_value = message.value
+            value = message.value
 
-            # Check if the message contains file size information
-            if message_value.startswith('file_size:'):
-                file_size = int(message_value.split(':')[1])
-                print(f"Received file size: {file_size}")
+            # Extract the file size from the message
+            if value.startswith("file_size:"):
+                file_size = int(value.split(":")[1])
+                print(f"File size: {file_size}")
             else:
-                # Process the regular record message
-                record_json = message_value
-                print(f"Received record: {record_json}")
-                  # Process the record
-                refined_record = process_json_record(record_json)
-                print(f"writing refine record:")
-                if refined_record:
-                    process_record(refined_record)
-
+                messages.append(value)
+                  # print(f"Received message: {value}")
+            # Process the accumulated messages when the desired file size is reached
+            #if file_size and len(messages) == file_size:
+                process_kafka_messages(messages)
+                # Clear the accumulated messages
+                messages = []
 
         # Close the Kafka consumer
         consumer.close()
-  
-  
     except Exception as e:
         print(f"An error occurred while consuming from Kafka: {str(e)}")
+
 
 # Set up Kafka consumer and process messages
 consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer)
