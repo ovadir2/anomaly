@@ -18,27 +18,28 @@ def trigger_fetch_and_produce():
      
     file_size=0
     if os.path.isfile(json_path):
-         scd_raw = pd.read_json(json_path)
-         file_size = os.path.getsize(json_path)
-         print(f"Reading from existing file, {len(scd_raw)}")
-         file_size = os.path.getsize(json_path)
-         os.rename(json_path, renamed_json_path)
+          scd_raw = pd.read_json(json_path)
+          scd_raw=scd_raw.head(3)
+          file_size = os.path.getsize(json_path)
+          print(f"Reading from existing file, {len(scd_raw)}")
+          os.rename(json_path, renamed_json_path)
     else:
         current_time = datetime.now()
         year = current_time.year
         quarter = None
         month = None
         yearweek = current_time.isocalendar()[1] -1 #need 1 week before for prediction
-        weekday = 4
+        weekday = None
         configs_id = 917
 
         print(year, quarter, month, yearweek, weekday, configs_id)
         scd_raw = fetch_sealing_data(year, quarter, month, yearweek, weekday, configs_id)
+        scd_raw=scd_raw.head(3)
         print(f"Fetching from new file")
-            
-    file_size = len(scd_raw)
-    print(f"File size: {file_size}")
-    
+                
+        file_size = len(scd_raw)
+        print(f"File size: {file_size}")
+        
     # # Convert DataFrame to json string
     # scd_raw_json = scd_raw.to_json(orient='records')
 

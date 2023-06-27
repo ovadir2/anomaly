@@ -95,8 +95,8 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
             json_path = "/home/naya/anomaly/files_json/scd_raw.json"
             df.columns = ['_BatchID' if col == 'BatchID' else col for col in df.columns]
             df.to_csv(csv_path)
-            df.tail(3).to_json(json_path)
-            print(df.head(5))
+            df.to_json(json_path)
+            print(df.head(3))
         
             return df
 
