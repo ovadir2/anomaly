@@ -101,7 +101,6 @@ def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, a
         refined_records = spark.createDataFrame([], schema=get_refined_record_schema())
 
         # Process messages from Kafka
-        i = 0
         # Consume and discard existing messages
         consumer.poll()
         file_size = 0
@@ -112,28 +111,32 @@ def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, a
                 file_size = int(message_value.split(':')[1])
                 print(f"Received file size: {file_size}")
             else:
-                if file_size > 0:
-                    i += 1
+                print(message_count,file_size)
+                if file_size > 0 :
+                    if message_count == file_size:
+                        message_count = 0
+                        file_size =0
+                    else:
+                        message_count += 1
                     # Decode the message value
                     message_value = message.value
                     # Process the record
                     refined_record = process_json_record(message.value, spark)
                     if  not refined_record.rdd.isEmpty():
-                        print(f"refined_record #, {i}                 : {refined_record}")
+                        print(f"refined_record #, {message_count}",end = '..')
                         # Append the refined record to the DataFrame
                         refined_records = refined_records.union(refined_record)
-                        if i == file_size:
-                            # Write the refined DataFrame to the output file
-                            print(f"Saving scd_refine.json file......")
-                            if  not refined_records.rdd.isEmpty():
-                                refined_records.printSchema()
-                                # Repartition the DataFrame to a single partition
-                                refined_records_single_partition = refined_records.repartition(1)
-                                # Write the DataFrame as a single JSON file without partitions
-                                refined_records_single_partition.write.json(local_path_refine_output, mode="overwrite")
-                            else:
-                                print('refined_records DataFrame is empty')
-
+                    if message_count == file_size and not refined_records.rdd.isEmpty():
+                        # Write the refined DataFrame to the output file
+                        print(f"Saving scd_refine.json file......")
+                        refined_records.printSchema()
+                        # Repartition the DataFrame to a single partition
+                        refined_records_single_partition = refined_records.repartition(1)
+                        # Write the DataFrame as a single JSON file without partitions
+                        refined_records_single_partition.write.json(local_path_refine_output, mode="overwrite")
+                
+                    else:
+                        print('refined_records DataFrame is empty')
         # Close the Kafka consumer
         consumer.close()
 
