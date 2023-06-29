@@ -1,108 +1,81 @@
+import traceback
 from kafka import KafkaConsumer
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import TimestampType
-import json
 import os
+from pyspark.sql import SparkSession
+from pyspark import SparkConf, SparkContext
+from pyspark.sql.functions import col, trim, udf
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType, DateType
 
-json_path = "/home/naya/anomaly/files_json/scd_raw.json"
-renamed_json_path = "/home/naya/anomaly/files_json/scd_raw_read.json"
-local_path_refine_output = "/home/naya/anomaly/files_json/scd_refine.json"
-
+# Kafka configuration
 host = 'cnt7-naya-cdh63'
 port = '9092'
-bootstrap_servers = f'{host}:{port}'
+bootstrap_servers = f'{host}:{port}' 
 topic = 'get_sealing_raw_data'
 group_id = 'prepare_predict_HDFS'
-enable_auto_commit = True
-auto_commit_interval_ms = 5000
-auto_offset_reset = 'earliest'
 value_deserializer = lambda x: x.decode('utf-8')
+auto_offset_reset = 'earliest'
 
+# Output file path
+local_path_refine_output = "/home/naya/anomaly/files_json/scd_refine.json"
 
-def process_json_record(record):
+def process_json_record(record, spark):
     try:
-        print('#######################################################################################################################################')
-        # Convert column names to lowercase
-        record = record.toDF(*(c.lower() for c in record.columns))
+        # Convert the JSON record to a DataFrame
+        df = spark.read.json(spark.sparkContext.parallelize([record]))
+        df = df.toDF(*(c.lower() for c in df.columns))
 
         # Trim whitespace from string columns
-        record = record.select(*(F.col(c).cast("string").trim().alias(c) if c in record.columns else F.col(c) for c in record.columns))
+        trim_udf = udf(lambda x: x.strip() if x is not None and isinstance(x, str) else x, StringType())
+        df = df.select(*(trim_udf(col(c)).alias(c) if c in df.columns else col(c) for c in df.columns))
 
-        # Delete rows where 'pass_failed' column is not 'Pass'
-        record = record.filter(record['pass_failed'] == 'Pass')
-        
-        # Trim whitespace from the 'pass_failed' column
-        record = record.withColumn('pass_failed', F.trim(F.col('pass_failed')))
+        # Apply Spark SQL transformations on the DataFrame
+        df.createOrReplaceTempView("record_table")
 
-        # Drop rows with null values in 'domecasegap' and 'stitcharea' columns
-        record = record.dropna(subset=['domecasegap', 'stitcharea'])
+        query = """
+        SELECT week, batchid, tp_cell_name, blister_id, domecasegap, domecasegap_limit,
+               domecasegap_spc, stitcharea, stitcharea_limit, stitcharea_spc, minstitchwidth,
+               bodytypeid, dometypeid, leaktest, laserpower, lotnumber, test_time_min * 60 AS test_time_sec,
+               date, error_code_number, pass_failed
+        FROM record_table
+        WHERE pass_failed = 'Pass'
+          AND domecasegap IS NOT NULL
+          AND stitcharea IS NOT NULL
+        """
 
-        # Convert 'test_time_min' column to duration in seconds
-        record = record.withColumn('test_time_sec', F.col('test_time_min').cast('float') * 60)
+        refined_record = spark.sql(query)
+        return refined_record
 
-        # Convert 'date' column to datetime if it's not already
-        record = record.withColumn('date', F.col('date').cast(TimestampType()))
-
-        # Select the desired columns to keep
-        columns_to_keep = ['week', 'batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit',
-                           'domecasegap_spc', 'stitcharea', 'stitcharea_limit', 'stitcharea_spc', 'minstitchwidth',
-                           'bodytypeid', 'dometypeid', 'leaktest', 'laserpower', 'lotnumber', 'test_time_sec',
-                           'date', 'error_code_number', 'pass_failed']
-
-        record = record.select(*columns_to_keep)
-        record.printSchema()
-
-        return record
     except Exception as e:
-        print(f"An error occurred while processing JSON record: {str(e)}")
+        print(f"An error occurred while processing the JSON record: {str(e)}")
+        traceback.print_exc()  # Print the traceback for detailed error information
         return None
 
-
-def process_kafka_messages(messages):
-    try:
-        # Concatenate the accumulated messages into a single JSON string
-        full_json = ''.join(messages)
-
-        # Split the full JSON string into individual records
-        record_strings = full_json.split('\n')
-
-        # Create a SparkSession
-        spark = SparkSession.builder.appName("KafkaMessageProcessor").getOrCreate()
-
-        # Process each individual JSON record
-        for record_string in record_strings:
-            try:
-                record = json.loads(record_string)
-                df = spark.createDataFrame([record])  # Convert JSON record to DataFrame
-
-                # Process the record
-                processed_df = process_json_record(df)
-                if processed_df is not None:
-                    print(f"processed_df: OK")
-            except json.JSONDecodeError as e:
-                print(f"Error parsing JSON record: {record_string}")
-            except Exception as e:
-                print(f"An error occurred while processing JSON record: {str(e)}")
-        if os.path.exists(local_path_refine_output):
-            # Read the existing file as a DataFrame
-            read_record = spark.read.json(local_path_refine_output)
-
-            # Append the refined DataFrame to the existing file
-            combined_record = record.union(read_record)
-            if not combined_record.isEmpty():
-                combined_record.write.json(local_path_refine_output, mode="overwrite")
-        else:
-            # Save the refined DataFrame as a new JSON file
-            if not record.isEmpty():
-                record.write.json(local_path_refine_output)  # Append the DataFrame to the destination file
-                #record.show(5)
-
-        # Stop the SparkSession
-        spark.stop()
-    except Exception as e:
-        print(f"An error occurred while processing Kafka messages: {str(e)}")
-
+def get_refined_record_schema():
+    """
+    Returns the schema for the refined records.
+    """
+    return StructType([
+        StructField("week", IntegerType(), nullable=True),
+        StructField("batchid", IntegerType(), nullable=True),
+        StructField("tp_cell_name", StringType(), nullable=True),
+        StructField("blister_id", StringType(), nullable=True),
+        StructField("domecasegap", StringType(), nullable=True),
+        StructField("domecasegap_limit", DoubleType(), nullable=True),
+        StructField("domecasegap_spc", DoubleType(), nullable=True),
+        StructField("stitcharea", DoubleType(), nullable=True),
+        StructField("stitcharea_limit", DoubleType(), nullable=True),
+        StructField("stitcharea_spc", DoubleType(), nullable=True),
+        StructField("minstitchwidth", DoubleType(), nullable=True),
+        StructField("bodytypeid", StringType(), nullable=True),
+        StructField("dometypeid", StringType(), nullable=True),
+        StructField("leaktest", StringType(), nullable=True),
+        StructField("laserpower", DoubleType(), nullable=True),
+        StructField("lotnumber", StringType(), nullable=True),
+        StructField("test_time_sec", DoubleType(), nullable=True),
+        StructField("date", DateType(), nullable=True),
+        StructField("error_code_number", StringType(), nullable=True),
+        StructField("pass_failed", StringType(), nullable=True)
+    ])
 
 def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, auto_offset_reset='earliest'):
     try:
@@ -117,32 +90,85 @@ def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, a
             value_deserializer=value_deserializer
         )
 
-        # Accumulate messages into a list
-        messages = []
+        # Create a SparkSession
+        conf = SparkConf().set("spark.debug.maxToStringFields", "100")
+
+        # Create SparkContext
+        sc = SparkContext(conf=conf)
+
+        # Create SparkSession using the SparkContext
+        spark = SparkSession.builder.config(conf=conf).getOrCreate()
+
+        # Create an empty DataFrame to hold the refined records
+        refined_records = spark.createDataFrame([], schema=get_refined_record_schema())
+
+        # Process messages from Kafka
+        # Consume and discard existing messages
+        consumer.poll()
         file_size = 0
-
-        # Read and process messages from the Kafka topic
+        message_count = 0  # Counter for processed messages
         for message in consumer:
-            value = message.value
-
-            # Extract the file size from the message
-            if value.startswith("file_size:"):
-                file_size = int(value.split(":")[1])
-                print(f"File size: {file_size}")
+            message_value = message.value
+            if message_value.startswith('file_size:'):
+                file_size = int(message_value.split(':')[1])
+                print(f"Received file size: {file_size}")
             else:
-                messages.append(value)
-                  # print(f"Received message: {value}")
-            # Process the accumulated messages when the desired file size is reached
-            #if file_size and len(messages) == file_size:
-                process_kafka_messages(messages)
-                # Clear the accumulated messages
-                messages = []
+                if file_size > 0:
+                    print(message_count, file_size)
+                    if message_count == file_size:
+                        message_count = 0
+                        file_size = 0
+                    else:
+                        message_count += 1
+                        # Decode the message value
+                        message_value = message.value
+                        
+                        # Process the record
+                        refined_record = process_json_record(message_value, spark)
+                        if not refined_record.rdd.isEmpty():
+                            print(f"refined_record #, {message_count}")
+                            # Append the refined record to the DataFrame
+                            refined_records = refined_records.union(refined_record)
+                        
+        # Perform the first aggregation
+        grouped_scd = refined_records.groupby('week').agg({
+            'domecasegap': ['max', 'min', 'mean', 'std'],
+            'stitcharea': ['max', 'min', 'mean', 'std']
+        })
 
-        # Close the Kafka consumer
-        consumer.close()
+        # Rename the columns for clarity
+        grouped_scd.columns = [
+            'maximum_domecasegap', 'minimum_domecasegap',\
+            'domecasegap_week_mean', 'domecasegap_week_stddev', \
+            'maximum_stitcharea', 'minimum_stitcharea',\
+            'stitcharea_week_mean', 'stitcharea_week_stddev'
+        ]
+
+        # Perform the second aggregation using scd_refine DataFrame
+        scd_weeks_raws = {}
+        scd_weeks_raws['stitcharea_week_mean'] = refined_records.groupby('week')['stitcharea'].mean()
+        scd_weeks_raws['stitcharea_week_stddev'] = refined_records.groupby('week')['stitcharea'].std()
+        scd_weeks_raws['domecasegap_week_mean'] = refined_records.groupby('week')['domecasegap'].mean()
+        scd_weeks_raws['domecasegap_week_stddev'] = refined_records.groupby('week')['domecasegap'].std()
+        scd_weeks_raws['maximum_domecasegap'] = refined_records.groupby('week')['domecasegap'].max()
+        scd_weeks_raws['minimum_domecasegap'] = refined_records.groupby('week')['domecasegap'].min()
+        scd_weeks_raws['maximum_stitcharea'] = refined_records.groupby('week')['stitcharea'].max()
+        scd_weeks_raws['minimum_stitcharea'] = refined_records.groupby('week')['stitcharea'].min()
+
+        # Print the result
+        for key, value in scd_weeks_raws.items():
+            value.show()
+
+        # Stop the SparkSession and SparkContext
+        spark.stop()
+        sc.stop()
+
     except Exception as e:
         print(f"An error occurred while consuming from Kafka: {str(e)}")
+        traceback.print_exc()  # Print the traceback for detailed error information
+
 
 
 # Set up Kafka consumer and process messages
-consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer)
+os.system('sudo pkill -9 -f SparkSubmit')
+consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, auto_offset_reset)
