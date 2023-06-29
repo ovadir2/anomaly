@@ -51,6 +51,38 @@ def process_json_record(record, spark):
         traceback.print_exc()  # Print the traceback for detailed error information
         return None
 
+def process_weekly_records(record, spark):
+    try:
+        # Convert the JSON record to a DataFrame
+        df = spark.read.json(spark.sparkContext.parallelize([record]))
+        df = df.toDF(*(c.lower() for c in df.columns))
+
+        # Trim whitespace from string columns
+        trim_udf = udf(lambda x: x.strip() if x is not None and isinstance(x, str) else x, StringType())
+        df = df.select(*(trim_udf(col(c)).alias(c) if c in df.columns else col(c) for c in df.columns))
+
+        # Apply Spark SQL transformations on the DataFrame
+        df.createOrReplaceTempView("record_table")
+
+        query = """
+        SELECT week, batchid, tp_cell_name, blister_id, domecasegap, domecasegap_limit,
+               domecasegap_spc, stitcharea, stitcharea_limit, stitcharea_spc, minstitchwidth,
+               bodytypeid, dometypeid, leaktest, laserpower, lotnumber, test_time_min * 60 AS test_time_sec,
+               date, error_code_number, pass_failed
+        FROM record_table
+        WHERE pass_failed = 'Pass'
+          AND domecasegap IS NOT NULL
+          AND stitcharea IS NOT NULL
+        """
+
+        refined_record = spark.sql(query)
+        refined_record.show() 
+        return refined_record
+
+    except Exception as e:
+        print(f"An error occurred while processing the JSON record: {str(e)}")
+        traceback.print_exc()  # Print the traceback for detailed error information
+        return None
 
 def get_refined_record_schema():
     """
@@ -128,23 +160,80 @@ def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, a
                         message_count += 1
                         # Decode the message value
                         message_value = message.value
+                        
                         # Process the record
                         refined_record = process_json_record(message.value, spark)
                         if  not refined_record.rdd.isEmpty():
                             print(f"refined_record #, {message_count}")
                             # Append the refined record to the DataFrame
                             refined_records = refined_records.union(refined_record)
-                            if  not refined_records.rdd.isEmpty():
-                                # Write the refined DataFrame to the output file
-                                refined_records.printSchema()
-                                # Repartition the DataFrame to a single partition
-                                refined_records_single_partition = refined_records.repartition(1)
-                                # Write the DataFrame as a single JSON file without partitions
-                                refined_records_single_partition.write.json(local_path_refine_output, mode="overwrite")
-                                print(f"Saving local scd_refine.json file - OK")
+                            
+                        if  not refined_records.rdd.isEmpty():
+                            # Write the refined DataFrame to the output file
+                            refined_records.printSchema()
+                            # Repartition the DataFrame to a single partition
+                            refined_records_single_partition = refined_records.repartition(1)
+                            # Write the DataFrame as a single JSON file without partitions
+                            refined_records_single_partition.write.json(local_path_refine_output, mode="overwrite")
+                            print(f"Saving local scd_refine.json file - OK")
+                            
+                             # Perform the first aggregation
+                            print('aggrigation')
+                           
+                            # # grouped_scd = refined_records.groupby('week').agg({
+                            # #     'domecasegap': ['max', 'min', 'mean', 'std'],
+                            # #     'stitcharea': ['max', 'min', 'mean', 'std']
+                            # # })
+
+                            # # Rename the columns for clarity
+                            # grouped_scd.columns =  [
+                            #     'maximum_domecasegap', 'minimum_domecasegap',\
+                            #     'domecasegap_week_mean', 'domecasegap_week_stddev', \
+                            #     'maximum_stitcharea', 'minimum_stitcharea',\
+                            #     'stitcharea_week_mean', 'stitcharea_week_stddev'
+                            # ]
+
+                            # # Perform the second aggregation using scd_refine DataFrame
+                            # scd_weeks_raws = {}
+                            # scd_weeks_raws['stitcharea_week_mean'] = refined_records.groupby('week')['stitcharea'].mean()
+                            # scd_weeks_raws['stitcharea_week_stddev'] = refined_records.groupby('week')['stitcharea'].std()
+                            # scd_weeks_raws['domecasegap_week_mean'] = refined_records.groupby('week')['domecasegap'].mean()
+                            # scd_weeks_raws['domecasegap_week_stddev'] = refined_records.groupby('week')['domecasegap'].std()
+                            # scd_weeks_raws['maximum_domecasegap'] = refined_records.groupby('week')['domecasegap'].max()
+                            # scd_weeks_raws['minimum_domecasegap'] = refined_records.groupby('week')['domecasegap'].min()
+                            # scd_weeks_raws['maximum_stitcharea'] = refined_records.groupby('week')['stitcharea'].max()
+                            # scd_weeks_raws['minimum_stitcharea'] = refined_records.groupby('week')['stitcharea'].min()
+                            # Select the columns
+                            selected_columns = [
+                                'week', 'batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit',
+                                'stitcharea', 'stitcharea_limit', 'minstitchwidth', 'bodytypeid', 'dometypeid',
+                                'test_time_sec', 'date', 'error_code_number', 'pass_failed'
+                            ]
+                             # Select the desired columns from the aggregated DataFrame
+                            scd_weeks_raws = refined_records.select(*selected_columns)
+                            
+                            from pyspark.sql import functions as F
+
+                            # Perform the aggregation
+                            scd_weeks_raws = refined_records.groupby('week').agg(
+                                F.max('domecasegap').alias('maximum_domecasegap'),
+                                F.min('domecasegap').alias('minimum_domecasegap'),
+                                F.mean('domecasegap').alias('domecasegap_week_mean'),
+                                F.stddev('domecasegap').alias('domecasegap_week_stddev'),
+                                F.max('stitcharea').alias('maximum_stitcharea'),
+                                F.min('stitcharea').alias('minimum_stitcharea'),
+                                F.mean('stitcharea').alias('stitcharea_week_mean'),
+                                F.stddev('stitcharea').alias('stitcharea_week_stddev')
+                            )
+
+                            # Print the result
+                            for key, value in scd_weeks_raws.items():
+                                value.show()
+                        else:
+                             print('refined_records DataFrame is empty')
                                 
-                            else:
-                                print('refined_records DataFrame is empty')
+           
+
         # Close the Kafka consumer
         consumer.close()
 
@@ -154,6 +243,12 @@ def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, a
     finally:
         # Stop the Spark session
         spark.stop()
+
+
+
+
+
+
 
 
 # Set up Kafka consumer and process messages
