@@ -94,8 +94,13 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
             csv_path = "/home/naya/anomaly/files_csv/scd_raw.csv"  
             json_path = "/home/naya/anomaly/files_json/scd_raw.json"
             df.columns = ['_BatchID' if col == 'BatchID' else col for col in df.columns]
-            df.to_csv(csv_path)
-            df.to_json(json_path)
+            # Trim all values in the DataFrame
+            df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+
+            # Lowercase all column names
+            df.columns = df.columns.str.lower()
+            df.to_csv(csv_path) #####################################################################
+            df.to_json(json_path) #################################################################
             print(df.head(3))
         
             return df
