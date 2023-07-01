@@ -6,7 +6,9 @@ from sklearn.ensemble import IsolationForest
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
+import pyarrow as pa
+import pyarrow.hdfs as hdfs
+
 
 # Kafka configuration
 host = 'cnt7-naya-cdh63'
@@ -18,6 +20,30 @@ enable_auto_commit = True
 auto_commit_interval_ms = 5000
 auto_offset_reset = 'earliest'
 value_deserializer = lambda x: x  # Return bytes without decoding
+
+
+
+
+def write_hdfs(fname, df):
+    fs = hdfs.HadoopFileSystem(
+        host='Cnt7-naya-cdh63',
+        port=8020,
+        user='hdfs',
+        kerb_ticket=None,
+        extra_conf=None
+    )
+
+    path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/'
+
+    try:
+        fs.mkdir(path + 'anomaly')
+    except FileExistsError:
+        pass  # Directory already exists, no need to create it
+
+    file_path = path + 'anomaly' + '/' + fname + '.json'
+    with fs.open(file_path, 'wb') as f:
+        json_bytes = df.to_json().encode('utf-8')
+        f.write(json_bytes)
 
 
 def sealing_cell_data_refining(json_messages):
@@ -163,15 +189,18 @@ for message in consumer:
 
         # Apply data refining function
         scd_anomaly, scd_refine = sealing_cell_data_refining(json_messages)
+        write_hdfs('scd_refine',scd_refine)
 
         scd_anomaly_check= check_anomalies(scd_anomaly, contamination=0.05, n_estimators=100);
-        
+        write_hdfs('scd_anomaly_check',scd_anomaly_check)
+
         scd_only_anomaly = scd_anomaly[scd_anomaly_check['anomaly'] == -1]
 
         features = ["domecasegap", "stitcharea"]
         scd_refine_first_row = scd_refine.iloc[0]  # Get the first row of scd_refine
 
         for feature in features:
+            
             # Extract the limit values from the first row of scd_refine
             limit_values = scd_refine_first_row[f'{feature}_limit']
             if limit_values:
@@ -185,7 +214,7 @@ for message in consumer:
 
                 # Display the trend plot
                 scd_only_anomaly_trend = spc_trend(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value, lo_value)
-
+                write_hdfs('scd_only_anomaly_trend',scd_only_anomaly_trend)
         # Display the anomaly plot
         fig_anomaly = display_scd_anomaly(scd_anomaly)
         fig_anomaly.show()
@@ -197,7 +226,6 @@ for message in consumer:
             print(scd_anomaly_check)  
             print(scd_only_anomaly)  
             print(scd_only_anomaly_trend) 
-            scd_only_anomaly_trend_hdfs =  
             break
 
     else:
