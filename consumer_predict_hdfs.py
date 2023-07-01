@@ -1,256 +1,121 @@
-import traceback
 from kafka import KafkaConsumer
-import os
-from pyspark.sql import SparkSession
-from pyspark import SparkConf, SparkContext
-from pyspark.sql.functions import col, trim, udf
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType, DateType
+import pandas as pd
+import jsonschema
+import json
+
 
 # Kafka configuration
 host = 'cnt7-naya-cdh63'
 port = '9092'
-bootstrap_servers = f'{host}:{port}' 
+bootstrap_servers = f'{host}:{port}'
 topic = 'get_sealing_raw_data'
 group_id = 'prepare_predict_HDFS'
-value_deserializer = lambda x: x.decode('utf-8')
+enable_auto_commit = True
+auto_commit_interval_ms = 5000
 auto_offset_reset = 'earliest'
-
-# Output file path
-local_path_refine_output = "/home/naya/anomaly/files_json/scd_refine.json"
-
-def process_json_record(record, spark):
-    try:
-        # Convert the JSON record to a DataFrame
-        df = spark.read.json(spark.sparkContext.parallelize([record]))
-        df = df.toDF(*(c.lower() for c in df.columns))
-
-        # Trim whitespace from string columns
-        trim_udf = udf(lambda x: x.strip() if x is not None and isinstance(x, str) else x, StringType())
-        df = df.select(*(trim_udf(col(c)).alias(c) if c in df.columns else col(c) for c in df.columns))
-
-        # Apply Spark SQL transformations on the DataFrame
-        df.createOrReplaceTempView("record_table")
-
-        query = """
-        SELECT week, batchid, tp_cell_name, blister_id, domecasegap, domecasegap_limit,
-               domecasegap_spc, stitcharea, stitcharea_limit, stitcharea_spc, minstitchwidth,
-               bodytypeid, dometypeid, leaktest, laserpower, lotnumber, test_time_min * 60 AS test_time_sec,
-               date, error_code_number, pass_failed
-        FROM record_table
-        WHERE pass_failed = 'Pass'
-          AND domecasegap IS NOT NULL
-          AND stitcharea IS NOT NULL
-        """
-
-        refined_record = spark.sql(query)
-        refined_record.show() 
-        return refined_record
-
-    except Exception as e:
-        print(f"An error occurred while processing the JSON record: {str(e)}")
-        traceback.print_exc()  # Print the traceback for detailed error information
-        return None
-
-def process_weekly_records(record, spark):
-    try:
-        # Convert the JSON record to a DataFrame
-        df = spark.read.json(spark.sparkContext.parallelize([record]))
-        df = df.toDF(*(c.lower() for c in df.columns))
-
-        # Trim whitespace from string columns
-        trim_udf = udf(lambda x: x.strip() if x is not None and isinstance(x, str) else x, StringType())
-        df = df.select(*(trim_udf(col(c)).alias(c) if c in df.columns else col(c) for c in df.columns))
-
-        # Apply Spark SQL transformations on the DataFrame
-        df.createOrReplaceTempView("record_table")
-
-        query = """
-        SELECT week, batchid, tp_cell_name, blister_id, domecasegap, domecasegap_limit,
-               domecasegap_spc, stitcharea, stitcharea_limit, stitcharea_spc, minstitchwidth,
-               bodytypeid, dometypeid, leaktest, laserpower, lotnumber, test_time_min * 60 AS test_time_sec,
-               date, error_code_number, pass_failed
-        FROM record_table
-        WHERE pass_failed = 'Pass'
-          AND domecasegap IS NOT NULL
-          AND stitcharea IS NOT NULL
-        """
-
-        refined_record = spark.sql(query)
-        refined_record.show() 
-        return refined_record
-
-    except Exception as e:
-        print(f"An error occurred while processing the JSON record: {str(e)}")
-        traceback.print_exc()  # Print the traceback for detailed error information
-        return None
-
-def get_refined_record_schema():
-    """
-    Returns the schema for the refined records.
-    """
-    return StructType([
-        StructField("week", IntegerType(), nullable=True),
-        StructField("batchid", IntegerType(), nullable=True),
-        StructField("tp_cell_name", StringType(), nullable=True),
-        StructField("blister_id", StringType(), nullable=True),
-        StructField("domecasegap", StringType(), nullable=True),
-        StructField("domecasegap_limit", DoubleType(), nullable=True),
-        StructField("domecasegap_spc", DoubleType(), nullable=True),
-        StructField("stitcharea", DoubleType(), nullable=True),
-        StructField("stitcharea_limit", DoubleType(), nullable=True),
-        StructField("stitcharea_spc", DoubleType(), nullable=True),
-        StructField("minstitchwidth", DoubleType(), nullable=True),
-        StructField("bodytypeid", StringType(), nullable=True),
-        StructField("dometypeid", StringType(), nullable=True),
-        StructField("leaktest", StringType(), nullable=True),
-        StructField("laserpower", DoubleType(), nullable=True),
-        StructField("lotnumber", StringType(), nullable=True),
-        StructField("test_time_sec", DoubleType(), nullable=True),
-        StructField("date", DateType(), nullable=True),
-        StructField("error_code_number", StringType(), nullable=True),
-        StructField("pass_failed", StringType(), nullable=True)
-    ])
+value_deserializer = lambda x: x  # Return bytes without decoding
 
 
-def consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, auto_offset_reset='earliest'):
-    try:
-        # Create the Kafka consumer
-        consumer = KafkaConsumer(
-            topic,
-            bootstrap_servers=bootstrap_servers,
-            group_id=group_id,
-            enable_auto_commit=True,
-            auto_commit_interval_ms=5000,
-            auto_offset_reset=auto_offset_reset,
-            value_deserializer=value_deserializer
-        )
+def sealing_cell_data_refining(json_messages):
+            df = pd.DataFrame(json_messages)
+            
+            df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+            # Lowercase all column names
+            df.columns = df.columns.str.lower()   
+            df = df[df['pass_failed'] == 'Pass']
 
-        # Create a SparkSession
-        # sc = SparkContext.getOrCreate()
-        # spark = SparkSession(sc)
-        # Configure Spark
-        conf = SparkConf().set("spark.debug.maxToStringFields", "100")
+            df.dropna(subset=['domecasegap'], inplace=True)
+            df.dropna(subset=['stitcharea'], inplace=True)
+            time = pd.to_datetime(df['test_time_min'], format='%H:%M')
+            # Calculate duration in minutes and seconds
+            in_minutes = time.dt.hour * 60 + time.dt.minute
+            df['test_time_sec'] = in_minutes * 60    # Calculate the required statistics
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+            
+            columns_to_keep = ['week','batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit','domecasegap_spc',\
+                            'stitcharea','stitcharea_limit','stitcharea_spc', \
+                            'minstitchwidth', 'bodytypeid', 'dometypeid', 'leaktest', 'laserpower', 'lotnumber',\
+                            'test_time_sec', 'date', 'error_code_number', 'pass_failed']
 
-        # Create SparkContext
-        sc = SparkContext(conf=conf)
+            df = df[columns_to_keep]
+            scd_refine = df
+            df['batchid'] = df['batchid'].astype(int)
+            
 
-        # Create SparkSession using the SparkContext
-        spark = SparkSession.builder.config(conf=conf).getOrCreate()
+            remove_col = ['blister_id','date','domecasegap_limit','domecasegap_spc','stitcharea_limit','stitcharea_spc','leaktest','laserpower','minstitchwidth']
+            scd_anomaly = df.drop(columns = remove_col) 
+            for col in ['pass_failed','dometypeid', 'bodytypeid','error_code_number','lotnumber']:
+                scd_anomaly[col] = scd_anomaly[col].astype('category').cat.codes
 
-        # Create an empty DataFrame to hold the refined records
-        refined_records = spark.createDataFrame([], schema=get_refined_record_schema())
+            remaim_col = scd_anomaly.columns
 
-        # Process messages from Kafka
-        # Consume and discard existing messages
-        consumer.poll()
-        file_size = 0
-        message_count = 0  # Counter for processed messages
-        for message in consumer:
-            message_value = message.value
-            if message_value.startswith('file_size:'):
-                file_size = int(message_value.split(':')[1])
-                print(f"Received file size: {file_size}")
-            else:
-                 if file_size > 0 :
-                    print(message_count,file_size)
-                    if message_count == file_size:
-                        message_count = 0
-                        file_size = 0
-                    else:
-                        message_count += 1
-                        # Decode the message value
-                        message_value = message.value
-                        
-                        # Process the record
-                        refined_record = process_json_record(message.value, spark)
-                        if  not refined_record.rdd.isEmpty():
-                            print(f"refined_record #, {message_count}")
-                            # Append the refined record to the DataFrame
-                            refined_records = refined_records.union(refined_record)
-                            
-                        if  not refined_records.rdd.isEmpty():
-                            # Write the refined DataFrame to the output file
-                            refined_records.printSchema()
-                            # Repartition the DataFrame to a single partition
-                            refined_records_single_partition = refined_records.repartition(1)
-                            # Write the DataFrame as a single JSON file without partitions
-                            refined_records_single_partition.write.json(local_path_refine_output, mode="overwrite")
-                            print(f"Saving local scd_refine.json file - OK")
-                            
-                             # Perform the first aggregation
-                            print('aggrigation')
-                           
-                            # # grouped_scd = refined_records.groupby('week').agg({
-                            # #     'domecasegap': ['max', 'min', 'mean', 'std'],
-                            # #     'stitcharea': ['max', 'min', 'mean', 'std']
-                            # # })
+            # Handle missing values by replacing them with a specific value (e.g., -999)
+            scd_anomaly = scd_anomaly.fillna(-999)
+        
+            
+            return scd_anomaly, scd_refine
 
-                            # # Rename the columns for clarity
-                            # grouped_scd.columns =  [
-                            #     'maximum_domecasegap', 'minimum_domecasegap',\
-                            #     'domecasegap_week_mean', 'domecasegap_week_stddev', \
-                            #     'maximum_stitcharea', 'minimum_stitcharea',\
-                            #     'stitcharea_week_mean', 'stitcharea_week_stddev'
-                            # ]
+# Create the Kafka consumer
+consumer = KafkaConsumer(
+    topic,
+    bootstrap_servers=bootstrap_servers,
+    group_id=group_id,
+    enable_auto_commit=enable_auto_commit,
+    auto_commit_interval_ms=auto_commit_interval_ms,
+    auto_offset_reset=auto_offset_reset,
+    value_deserializer=value_deserializer
+)
 
-                            # # Perform the second aggregation using scd_refine DataFrame
-                            # scd_weeks_raws = {}
-                            # scd_weeks_raws['stitcharea_week_mean'] = refined_records.groupby('week')['stitcharea'].mean()
-                            # scd_weeks_raws['stitcharea_week_stddev'] = refined_records.groupby('week')['stitcharea'].std()
-                            # scd_weeks_raws['domecasegap_week_mean'] = refined_records.groupby('week')['domecasegap'].mean()
-                            # scd_weeks_raws['domecasegap_week_stddev'] = refined_records.groupby('week')['domecasegap'].std()
-                            # scd_weeks_raws['maximum_domecasegap'] = refined_records.groupby('week')['domecasegap'].max()
-                            # scd_weeks_raws['minimum_domecasegap'] = refined_records.groupby('week')['domecasegap'].min()
-                            # scd_weeks_raws['maximum_stitcharea'] = refined_records.groupby('week')['stitcharea'].max()
-                            # scd_weeks_raws['minimum_stitcharea'] = refined_records.groupby('week')['stitcharea'].min()
-                            # Select the columns
-                            selected_columns = [
-                                'week', 'batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit',
-                                'stitcharea', 'stitcharea_limit', 'minstitchwidth', 'bodytypeid', 'dometypeid',
-                                'test_time_sec', 'date', 'error_code_number', 'pass_failed'
-                            ]
-                             # Select the desired columns from the aggregated DataFrame
-                            scd_weeks_raws = refined_records.select(*selected_columns)
-                            
-                            from pyspark.sql import functions as F
+# Collect all messages into a list
+messages = []
+file_size = 0
+message_count = 0
+#consumer.poll()
 
-                            # Perform the aggregation
-                            scd_weeks_raws = refined_records.groupby('week').agg(
-                                F.max('domecasegap').alias('maximum_domecasegap'),
-                                F.min('domecasegap').alias('minimum_domecasegap'),
-                                F.mean('domecasegap').alias('domecasegap_week_mean'),
-                                F.stddev('domecasegap').alias('domecasegap_week_stddev'),
-                                F.max('stitcharea').alias('maximum_stitcharea'),
-                                F.min('stitcharea').alias('minimum_stitcharea'),
-                                F.mean('stitcharea').alias('stitcharea_week_mean'),
-                                F.stddev('stitcharea').alias('stitcharea_week_stddev')
-                            )
+for message in consumer:
+    message_value = message.value.decode('utf-8')  # Decode the message value
+    if message_value.startswith('file_size:'):
+        file_size = int(message_value.split(':')[1]) 
+        print(f"Received file size: {file_size}")
+    else:
+        messages.append(message_value)
+        message_count += 1
 
-                            # Print the result
-                            for key, value in scd_weeks_raws.items():
-                                value.show()
-                        else:
-                             print('refined_records DataFrame is empty')
-                                
-           
+    if file_size > 0 and message_count == file_size:
+         # Select a single message from the messages list
+        # json_message= json.loads(messages[0])
 
-        # Close the Kafka consumer
-        consumer.close()
+        # # Generate the schema
+        # schema = jsonschema.Draft7Validator(json_message).schema
 
-    except Exception as e:
-        print(f"An error occurred while consuming from Kafka: {str(e)}")
-        traceback.print_exc()  # Print the traceback for detailed error information
-    finally:
-        # Stop the Spark session
-        spark.stop()
+        # # Print the schema
+        # print(json.dumps(schema, indent=4))
 
 
+        # Convert the PyArrow Table to a PyArrow RecordBatch
+        # record_batch = table.to_batches()[0]
+
+        # # Perform data refining operations on the RecordBatch
+                    
+
+        # Convert the messages list to JSON objects
+        json_messages = [json.loads(msg) for msg in messages]
+
+        # Apply data refining function
+        scd_anomaly, scd_refine = sealing_cell_data_refining(json_messages)
 
 
+        if __name__ == '__main__':
+                    # Print the anomaly 
+                    print(scd_anomaly)
+                    # Print the refined schema
+                    print(scd_refine)    # Print the running number on the same position
+                    
+                    break
 
+      # Print the running number on the same position
+    else:
+        print(f"{message_count}", end='\r')
 
-
-
-# Set up Kafka consumer and process messages
-os.system('sudo pkill -9 -f SparkSubmit')
-consume_from_kafka(topic, bootstrap_servers, group_id, value_deserializer, auto_offset_reset)
+# Close the Kafka consumer
+consumer.close()
