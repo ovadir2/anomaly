@@ -1,12 +1,10 @@
 from kafka import KafkaConsumer
 import pandas as pd
-import jsonschema
 import json
 from sklearn.ensemble import IsolationForest
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import pyarrow as pa
 import pyarrow.hdfs as hdfs
 
 
@@ -44,7 +42,6 @@ def write_hdfs(fname, df):
     with fs.open(file_path, 'wb') as f:
         json_bytes = df.to_json().encode('utf-8')
         f.write(json_bytes)
-
 
 def sealing_cell_data_refining(json_messages):
     df = pd.DataFrame(json_messages)
@@ -129,7 +126,6 @@ def spc_trend(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_value
     df['alarm'] = alarm
 
     return df
-
     
 def display_scd_anomaly(scd_anomaly):
     lotnumbers = scd_anomaly['lotnumber'].unique()
@@ -215,9 +211,7 @@ for message in consumer:
                 # Display the trend plot
                 scd_only_anomaly_trend = spc_trend(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value, lo_value)
                 write_hdfs('scd_only_anomaly_trend',scd_only_anomaly_trend)
-        # Display the anomaly plot
-        fig_anomaly = display_scd_anomaly(scd_anomaly)
-        fig_anomaly.show()
+        
 
       
         if __name__ == '__main__':

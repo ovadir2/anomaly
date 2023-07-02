@@ -1,19 +1,8 @@
 import pandas as pd
-# import urllib
-# import urllib.parse
-# import sqlalchemy as sa
 import pyarrow as pa
-#import pyarrow.hdfs as hdfs
 import pyarrow.filesystem as fs
 import os
-# from sqlalchemy.sql import text
-# from sqlalchemy.exc import OperationalError 
-# from sqlalchemy.exc import SQLAlchemyError
 import pyodbc
-# from pyspark.sql.functions import current_timestamp
-# #from sqlalchemy import create_engine
-# #from  append_hdfs_parquet import append_hdfs_parquet
-import io
   
 #configs_id for sealingcell is '917'
 def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekday=None, configs_id=917):
@@ -91,16 +80,15 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
             # print(' LTD_BRAVO stations data......completed')
             # print('=======================================')
  
-            csv_path = "/home/naya/anomaly/files_csv/scd_raw.csv"  
+            #csv_path = "/home/naya/anomaly/files_csv/scd_raw.csv"  
             json_path = "/home/naya/anomaly/files_json/scd_raw.json"
             df.columns = ['_BatchID' if col == 'BatchID' else col for col in df.columns]
             # Trim all values in the DataFrame
             df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
             # Lowercase all column names
             df.columns = df.columns.str.lower()
-            df.to_csv(csv_path) #####################################################################
-            df.to_json(json_path) #################################################################
+            #save
+            df.to_json(json_path) 
             print(df.head(3))
         
             return df
@@ -110,7 +98,7 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
         return pd.DataFrame()
 
 if __name__ == '__main__':
-    scd_raw = fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=22, weekday=5, configs_id=917)
+    scd_raw = fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=27, weekday=None, configs_id=917)
     print("sql.py main ")
  
 
