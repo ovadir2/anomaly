@@ -216,5 +216,13 @@ def main():
     # Refresh the page every 10 seconds
     st.experimental_rerun_everything(seconds=10)
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    # Create an argument parser
+    parser = argparse.ArgumentParser()
+    # Add the --history option
+    parser.add_argument("--history", type=str, default='No', help="Specify the history yes/No value")
+    # Parse the command line arguments
+    args = parser.parse_args()
+
+    # Trigger the fetch and produce function with the parsed history value
+    main(history=args.history)
