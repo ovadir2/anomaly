@@ -6,7 +6,6 @@ from sql import fetch_sealing_data
 import argparse
 
 json_path = "/home/naya/anomaly/files_json/scd_raw.json"
-json_path = "/home/naya/anomaly/files_json/scd_raw.json"
 renamed_json_path = "/home/naya/anomaly/files_json/scd_raw_read.json"
 
 
@@ -38,7 +37,7 @@ def trigger_fetch_and_produce(history_value= 'No'):
    
     print(year, quarter, month, yearweek, weekday, configs_id)
     scd_raw = fetch_sealing_data(year, quarter, month, yearweek, weekday, configs_id)
-    print(f"Fetching from new file")
+    print(f"Fetching from DB")
             
     file_size = len(scd_raw) 
     print(f"File size: {file_size}")

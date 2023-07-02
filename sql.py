@@ -88,7 +88,7 @@ def fetch_sealing_data(year=2023, quarter=None, month=None, yearweek=None, weekd
             # Lowercase all column names
             df.columns = df.columns.str.lower()
             #save
-            df.to_json(json_path) 
+            #df.to_json(json_path) 
             print(df.head(3))
         
             return df
