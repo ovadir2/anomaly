@@ -21,7 +21,7 @@ def read_hdfs(file_path):
         json_str = json_bytes.decode('utf-8')
         df = pd.read_json(json_str)
     return df
-  
+
 def prediction_train(scd_weeks_raws):
         print("Trainning the model")
         ref=0.2*len(scd_weeks_raws)
@@ -67,11 +67,58 @@ def save_the_model(path_to_models, pred_MA_stitcharea, pred_STD_stitcharea):
        
     return True
 
-def get_perdicted_values(scd_weeks_raws, pred_MA_stitcharea, pred_STD_stitcharea):
+def write_appended_hdfs(fname, df):
+    fs = hdfs.HadoopFileSystem(
+        host='Cnt7-naya-cdh63',
+        port=8020,
+        user='hdfs',
+        kerb_ticket=None,
+        extra_conf=None
+    )
+
+    path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/'
+    directory = path + 'anomaly'
+    file_path = directory + '/' + fname + '.json'
+
+    if not fs.exists(directory):
+        fs.mkdir(directory)
+
+    # Check if file exists
+    if fs.exists(file_path):
+        with fs.open(file_path, 'rb') as f:
+            existing_data = f.read().decode('utf-8')
+        
+        # Convert existing data to DataFrame
+        if existing_data:
+            existing_df = pd.read_json(existing_data)
+        else:
+            existing_df = pd.DataFrame()
+    else:
+        existing_df = pd.DataFrame()
+
+    # Concatenate the existing DataFrame with the new DataFrame
+    appended_df = pd.concat([existing_df, df], ignore_index=True)
+
+    # Write the appended DataFrame to HDFS
+    with fs.open(file_path, 'wb') as f:
+        f.write(appended_df.to_json().encode('utf-8'))
     
+def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_RECORD_value=20 , NEXT_TRAIN_QTY_value=100):
+    scd_refine_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_refine.json'
+    scd_weeks_raws_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_weeks_raws.json'
+    scd_only_anomaly_trend_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_only_anomaly_trend.json'
+    triger_alarm_table_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/triger_alarm_table.json'
+
+    scd_refine = read_hdfs(scd_refine_path)
+    scd_weeks_raws = read_hdfs(scd_weeks_raws_path)
+    scd_only_anomaly_trend = read_hdfs(scd_only_anomaly_trend_path)
+    
+    #assuming weekly new data row is appended to this data file 
     week_record = scd_weeks_raws.tail(1)
-    year_value = scd_raw.tail(1)['year'].values[0] if week_record.index[0] < 52 else  scd_raw.tail(1)['year'].values[0]+1
-    current_week_value = week_record.index[0]
+    print(week_record['week'].values[0])
+    year_value = scd_refine['year'].values[0] if week_record['week'].index[0] < 52 else  scd_refine['year'].values[0]+1
+    print('year_value',year_value)
+    current_week_value = scd_refine['week'].values[0]
     next_week_value = current_week_value + 1 if current_week_value < 52 else 1
     matching_row = None
     for index, row in scd_only_anomaly_trend.iterrows():
@@ -91,7 +138,7 @@ def get_perdicted_values(scd_weeks_raws, pred_MA_stitcharea, pred_STD_stitcharea
         spc_lower_limit = 0  # Assign a default value or handle it according to your requirements
         spc_upper_limit = 0  # Assign a default value or handle it according to your requirements
 
-    df = pd.DataFrame({
+    df_row = pd.DataFrame({
         'week': current_week_value,
         'pred_year': year_value,
         'pred_week': next_week_value,
@@ -103,34 +150,30 @@ def get_perdicted_values(scd_weeks_raws, pred_MA_stitcharea, pred_STD_stitcharea
         'alarm_pre_stitcharea': 0,
         're-train_required': 0,
         'additional_recorrds_needed': 0,
-        'next_retraining_and_assigned': 70,
-        'minimum_train_records_qty': 40
+        'next_retraining_and_assigned': NEXT_TRAIN_QTY_value,
+        'minimum_train_records_qty': MIN_PRED_RECORD_value
     })
-
-    if len(scd_weeks_raws) > df['minimum_train_records_qty'].iloc[0]:
-        if len(scd_weeks_raws) < df['next_retraining_and_assigned'].iloc[0]:
+    predicted_stitcharea = df_row['predicted_stitcharea_calculate'].values[0]
+    print('predicted_stitcharea point = ',predicted_stitcharea )
+    
+    if len(scd_weeks_raws) > df_row['minimum_train_records_qty'].iloc[0]:
+        if len(scd_weeks_raws) < df_row['next_retraining_and_assigned'].iloc[0]:
             # Compare the predicted stitch area to the SPC limits
                 is_alarm = (predicted_stitcharea < spc_lower_limit) | (predicted_stitcharea > spc_upper_limit)
                 if is_alarm.any():
-                    print(f"Alarm: predicted_stitcharea {predicted_stitcharea.iloc[0]} is out of SPC limits")
-                    df['alarm_pre_stitcharea'] = 1
+                    print(f"Alarm: predicted_stitcharea {predicted_stitcharea} is out of SPC limits")
+                    df_row['alarm_pre_stitcharea'] = 1
                 else:
-                    print(f"No Alarm: predicted_stitcharea {predicted_stitcharea.iloc[0]} is within SPC limits")
-                    df['alarm_pre_stitcharea'] = 0
-                df['re-train_required'] = 0
+                    print(f"No Alarm: predicted_stitcharea {predicted_stitcharea} is within SPC limits")
+                    df_row['alarm_pre_stitcharea'] = 0
+                df_row['re-train_required'] = 0
         else:
             print("Need to re-train the data.....")
-            df['re-train_required'] = 1
+            df_row['re-train_required'] = 1
     else:
         print('Need to have more data for prediction model training....')
-        df['additional_recorrds_needed'] = 1
-
-    display(df)
-    common_columns = df.columns.tolist()
-    triger_alarm_table = pd.concat([triger_alarm_table[common_columns], df[common_columns]], ignore_index=True)
-    display(triger_alarm_table.tail(1))
-    triger_alarm_table.to_csv('triger_alarm_table.csv')
-    
+        df_row['additional_recorrds_needed'] = 1
+        write_appended_hdfs('triger_alarm_table',df_row)
     
 def read_model(path):
     print("Using existing model...")
@@ -155,8 +198,7 @@ def read_model(path):
     return use_pred_MA_stitcharea, use_pred_STD_stitcharea
 
 
-    
-
+ 
 if __name__ == "__main__":
     # Create an argument parser
     parser = argparse.ArgumentParser()
@@ -169,8 +211,8 @@ if __name__ == "__main__":
     MIN_PRED_RECORD_value = args.MIN_PRED_RECORD
     NEXT_TRAIN_QTY_value = args.NEXT_TRAIN_QTY
     
-    path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/'
-    scd_weeks_raws_file_path = (path + 'anomaly/scd_weeks_raws.json')
+    path = 'hdfs://cnt7-naya-cdh63:8020/user/naya/anomaly/'
+    scd_weeks_raws_file_path = (path + 'scd_weeks_raws.json')
 
  
     scd_weeks_raws = read_hdfs(scd_weeks_raws_file_path)
@@ -183,9 +225,7 @@ if __name__ == "__main__":
             save_the_model(path,pred_MA_stitcharea, pred_STD_stitcharea)
         else:
             pred_MA_stitcharea, pred_STD_stitcharea = read_model(path)
-            
-            ######## need to see if predicted values are deviated
-            print(pred_MA_stitcharea, pred_STD_stitcharea)  
+            triger_alarm_table(pred_MA_stitcharea, pred_STD_stitcharea,MIN_PRED_RECORD_value,NEXT_TRAIN_QTY_value)
     else:
         print("not enought records to train....")
     

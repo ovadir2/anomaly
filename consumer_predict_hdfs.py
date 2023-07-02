@@ -59,7 +59,7 @@ def sealing_cell_data_refining(json_messages):
 def scd_weeks_group(scd_refine):
     scd_weeks_raws = scd_refine.groupby('week').agg({
         'domecasegap': ['max', 'min', 'mean', 'std'],
-        'stitcharea': ['max', 'min', 'mean', 'std']
+        'stitcharea': ['max', 'min', 'mean', 'std'],
     })
 
     # Rename the columns for clarity
@@ -69,8 +69,10 @@ def scd_weeks_group(scd_refine):
         'maximum_stitcharea', 'minimum_stitcharea',\
         'stitcharea_week_mean', 'stitcharea_week_stddev'
     ]
-
+    # Add the 'week' column
+    scd_weeks_raws['week'] = scd_weeks_raws.index
     # Perform the second aggregation using scd_refine DataFrame
+    
     scd_weeks_raws['stitcharea_week_mean'] = scd_refine.groupby('week')['stitcharea'].mean()
     scd_weeks_raws['stitcharea_week_stddev'] = scd_refine.groupby('week')['stitcharea'].std()
     scd_weeks_raws['domecasegap_week_mean'] = scd_refine.groupby('week')['domecasegap'].mean()
