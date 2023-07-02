@@ -33,7 +33,7 @@ def sealing_cell_data_refining(json_messages):
     df['test_time_sec'] = in_minutes * 60    # Calculate the required statistics
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     
-    columns_to_keep = ['week','batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit','domecasegap_spc',\
+    columns_to_keep = ['week', 'year', 'batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit','domecasegap_spc',\
                     'stitcharea','stitcharea_limit','stitcharea_spc', \
                     'minstitchwidth', 'bodytypeid', 'dometypeid', 'leaktest', 'laserpower', 'lotnumber',\
                     'test_time_sec', 'date', 'error_code_number', 'pass_failed']
@@ -43,7 +43,7 @@ def sealing_cell_data_refining(json_messages):
     df['batchid'] = df['batchid'].astype(int)
     
 
-    remove_col = ['blister_id','date','domecasegap_limit','domecasegap_spc','stitcharea_limit','stitcharea_spc','leaktest','laserpower','minstitchwidth']
+    remove_col = ['blister_id','date','year','domecasegap_limit','domecasegap_spc','stitcharea_limit','stitcharea_spc','leaktest','laserpower','minstitchwidth']
     scd_anomaly = df.drop(columns = remove_col) 
     for col in ['pass_failed','dometypeid', 'bodytypeid','error_code_number','lotnumber']:
         scd_anomaly[col] = scd_anomaly[col].astype('category').cat.codes
@@ -118,6 +118,27 @@ def write_appended_hdfs(fname, df):
     with fs.open(file_path, 'wb') as f:
         f.write(json_data.encode('utf-8'))
 
+def write_hdfs(fname, df):
+    fs = hdfs.HadoopFileSystem(
+        host='Cnt7-naya-cdh63',
+        port=8020,
+        user='hdfs',
+        kerb_ticket=None,
+        extra_conf=None
+    )
+
+    path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/'
+
+    try:
+        fs.mkdir(path + 'anomaly')
+    except FileExistsError:
+        pass  # Directory already exists, no need to create it
+
+    file_path = path + 'anomaly' + '/' + fname + '.json'
+    with fs.open(file_path, 'wb') as f:
+        json_bytes = df.to_json().encode('utf-8')
+        f.write(json_bytes)
+
 
 # Create the Kafka consumer
 consumer = KafkaConsumer(
@@ -151,6 +172,7 @@ for message in consumer:
 
         # Apply data refining function
         scd_anomaly, scd_refine = sealing_cell_data_refining(json_messages)
+        write_hdfs('scd_refine',scd_refine)
 
         scd_weeks_raws = scd_weeks_group(scd_refine)
         

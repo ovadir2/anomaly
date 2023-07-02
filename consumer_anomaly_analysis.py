@@ -185,7 +185,7 @@ for message in consumer:
 
         # Apply data refining function
         scd_anomaly, scd_refine = sealing_cell_data_refining(json_messages)
-        write_hdfs('scd_refine',scd_refine)
+        #write_hdfs('scd_refine',scd_refine)
 
         scd_anomaly_check= check_anomalies(scd_anomaly, contamination=0.05, n_estimators=100);
         write_hdfs('scd_anomaly_check',scd_anomaly_check)

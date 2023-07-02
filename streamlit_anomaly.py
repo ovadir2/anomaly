@@ -7,6 +7,7 @@ import pyarrow as pa
 import pyarrow.hdfs as hdfs
 import time
 import datetime
+import argparse
 
 
 def spc_trend(df, feature, hi_limit, lo_limit, hi_value, lo_value):
