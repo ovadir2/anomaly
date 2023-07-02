@@ -10,14 +10,14 @@ json_path = "/home/naya/anomaly/files_json/scd_raw.json"
 renamed_json_path = "/home/naya/anomaly/files_json/scd_raw_read.json"
 
 
-def trigger_fetch_and_produce(history= 'No'):
-    print("history:", history)
+def trigger_fetch_and_produce(history_value= 'No'):
+    print("history:", history_value)
     host = 'cnt7-naya-cdh63'
     port = '9092'
     topic = 'get_sealing_raw_data'
     bootstrap_servers = f'{host}:{port}' 
     
-    if  history == 'No':
+    if  history_value.lower() == 'no':
         current_time = datetime.now()
         year = current_time.year
         quarter = None
@@ -68,4 +68,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Trigger the fetch and produce function with the parsed history value
-    trigger_fetch_and_produce(history=args.history)
+    trigger_fetch_and_produce(history_value=args.history)
