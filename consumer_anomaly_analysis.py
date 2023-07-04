@@ -3,17 +3,15 @@ import pandas as pd
 import json
 from sklearn.ensemble import IsolationForest
 import numpy as np
-import matplotlib.pyplot as plt
 import seaborn as sns
 import pyarrow.hdfs as hdfs
-
 
 # Kafka configuration
 host = 'cnt7-naya-cdh63'
 port = '9092'
 bootstrap_servers = f'{host}:{port}'
 topic = 'get_sealing_raw_data'
-group_id = 'prepare_anomaly'
+group_id = 'prepare_anomalyB'
 enable_auto_commit = True
 auto_commit_interval_ms = 5000
 auto_offset_reset = 'earliest'
@@ -127,33 +125,6 @@ def spc_trend(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_value
 
     return df
     
-def display_scd_anomaly(scd_anomaly):
-    lotnumbers = scd_anomaly['lotnumber'].unique()
-
-    # Filter out lotnumbers with less than 800 items
-    lotnumbers_filtered = [lotnumber for lotnumber in lotnumbers if len(scd_anomaly[scd_anomaly['lotnumber'] == lotnumber]) >= 800]
-
-    # Limit the number of subplots to a maximum of 10
-    num_subplots = min(len(lotnumbers_filtered), 10)
-
-    # Set the spacing between the subplots
-    fig, axes = plt.subplots(num_subplots, 1, figsize=(8, num_subplots * 7))
-
-    # Create separate scatter plots for each lotnumber
-    for i, lotnumber in enumerate(lotnumbers_filtered):
-        if i < num_subplots:
-            subset = scd_anomaly[scd_anomaly['lotnumber'] == lotnumber]
-            ax = np.atleast_1d(axes)[i]  # Use np.atleast_1d() to handle single subplot case
-            unique_anomalies = subset['anomaly'].unique()  # Get unique anomaly values
-            palette = ['black', 'orange'][:len(unique_anomalies)]  # Adjust the palette based on the number of unique anomalies
-            sns.scatterplot(data=subset, x='stitcharea', y='domecasegap', hue='anomaly', palette=palette, alpha=0.5, ax=ax)
-            ax.set_title(f"Scatter Plot for Lot Number: {lotnumber}", color='blue', fontsize=16)
-            ax.set_ylabel('Dome Case Gap')
-            ax.set_xlabel('Stitch Area')
-            plt.subplots_adjust(hspace=0.5)
-
-    return fig
-
 # Create the Kafka consumer
 consumer = KafkaConsumer(
     topic,
@@ -169,7 +140,7 @@ consumer = KafkaConsumer(
 messages = []
 file_size = 0
 message_count = 0
-#consumer.poll()
+#consumer1.poll()
 
 for message in consumer:
     message_value = message.value.decode('utf-8')  # Decode the message value
@@ -181,6 +152,9 @@ for message in consumer:
         message_count += 1
 
     if file_size > 0 and message_count == file_size:
+        file_size = 0
+        message_count = 0
+        # Convert the messages list to JSON objects
         json_messages = [json.loads(msg) for msg in messages]
 
         # Apply data refining function
@@ -211,20 +185,16 @@ for message in consumer:
                 # Display the trend plot
                 scd_only_anomaly_trend = spc_trend(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value, lo_value)
                 write_hdfs('scd_only_anomaly_trend',scd_only_anomaly_trend)
-        
-
-      
         if __name__ == '__main__':
             print(scd_anomaly)
             print(scd_refine)  
             print(scd_anomaly_check)  
             print(scd_only_anomaly)  
             print(scd_only_anomaly_trend) 
-            break
+             #break
 
     else:
         print(f"{message_count}", end='\r')
-
 # Close the Kafka consumer
 consumer.close()
 

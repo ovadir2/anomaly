@@ -108,7 +108,6 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
     scd_refine_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_refine.json'
     scd_weeks_raws_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_weeks_raws.json'
     scd_only_anomaly_trend_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_only_anomaly_trend.json'
-    triger_alarm_table_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/triger_alarm_table.json'
 
     #year_value=print(datetime.now().year) 
     scd_refine = read_hdfs(scd_refine_path)
@@ -145,7 +144,7 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
             # Compare the predicted stitch area to the SPC limits
                 is_alarm = (predicted_stitcharea < spc_lower_limit) | (predicted_stitcharea > spc_upper_limit)
                 if is_alarm.any():
-                    msg =f"Alarm: predicted_stitcharea {predicted_stitcharea} is out of SPC limits {spc_lower_limit}: {spc_upper_limit}"
+                    msg =f"Alarm: predicted_stitcharea {predicted_stitcharea:03f} is out of SPC limits {spc_lower_limit:03f}: {spc_upper_limit:03f}"
                     df_row['alarm_pre_stitcharea'] = 1
                 else:
                     msg =f"No Alarm: predicted_stitcharea {predicted_stitcharea} is within SPC limits {spc_lower_limit}: {spc_upper_limit}"
@@ -158,8 +157,7 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
         msg="Need to have more data for prediction model training...."
         df_row['additional_recorrds_needed'] = 1
         msg=('Need to have more data for prediction model training....')
-    write_appended_hdfs('triger_alarm_table',df_row)
-    return(msg)
+    return msg,df_row
         
     
 def read_model(path):
@@ -187,6 +185,7 @@ def read_model(path):
 
  
 if __name__ == "__main__":
+    triger_alarm_table_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/triger_alarm_table.json'
     # Create an argument parser
     parser = argparse.ArgumentParser()
     # Add the --history option
@@ -212,8 +211,10 @@ if __name__ == "__main__":
             save_the_model(path,pred_MA_stitcharea, pred_STD_stitcharea)
         else:
             pred_MA_stitcharea, pred_STD_stitcharea = read_model(path)
-            msg = triger_alarm_table(pred_MA_stitcharea, pred_STD_stitcharea,MIN_PRED_RECORD_value,NEXT_TRAIN_QTY_value)
+            msg,df_row = triger_alarm_table(pred_MA_stitcharea, pred_STD_stitcharea,MIN_PRED_RECORD_value,NEXT_TRAIN_QTY_value)
             print(msg)
+            write_appended_hdfs('triger_alarm_table',df_row)
+ 
     else:
         print("not enought records to train....")
     

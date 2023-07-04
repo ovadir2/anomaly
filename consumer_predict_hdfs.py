@@ -57,32 +57,55 @@ def sealing_cell_data_refining(json_messages):
     return scd_anomaly, scd_refine
 
 def scd_weeks_group(scd_refine):
-    scd_weeks_raws = scd_refine.groupby('week').agg({
+    scd_weeks_raws = scd_refine.groupby(['year', 'week']).agg({
         'domecasegap': ['max', 'min', 'mean', 'std'],
         'stitcharea': ['max', 'min', 'mean', 'std'],
     })
 
     # Rename the columns for clarity
     scd_weeks_raws.columns = [
-        'maximum_domecasegap', 'minimum_domecasegap',\
-        'domecasegap_week_mean', 'domecasegap_week_stddev', \
-        'maximum_stitcharea', 'minimum_stitcharea',\
+        'maximum_domecasegap', 'minimum_domecasegap',
+        'domecasegap_week_mean', 'domecasegap_week_stddev',
+        'maximum_stitcharea', 'minimum_stitcharea',
         'stitcharea_week_mean', 'stitcharea_week_stddev'
     ]
-    # Add the 'week' column
-    scd_weeks_raws['week'] = scd_weeks_raws.index
-    # Perform the second aggregation using scd_refine DataFrame
     
-    scd_weeks_raws['stitcharea_week_mean'] = scd_refine.groupby('week')['stitcharea'].mean()
-    scd_weeks_raws['stitcharea_week_stddev'] = scd_refine.groupby('week')['stitcharea'].std()
-    scd_weeks_raws['domecasegap_week_mean'] = scd_refine.groupby('week')['domecasegap'].mean()
-    scd_weeks_raws['domecasegap_week_stddev'] = scd_refine.groupby('week')['domecasegap'].std()
-    scd_weeks_raws['maximum_domecasegap'] = scd_refine.groupby('week')['domecasegap'].max()
-    scd_weeks_raws['minimum_domecasegap'] = scd_refine.groupby('week')['domecasegap'].min()
-    scd_weeks_raws['maximum_stitcharea'] = scd_refine.groupby('week')['stitcharea'].max()
-    scd_weeks_raws['minimum_stitcharea'] = scd_refine.groupby('week')['stitcharea'].min()
+    # Reset the index to include 'year' and 'week' as columns
+    scd_weeks_raws = scd_weeks_raws.reset_index()
 
-    return(scd_weeks_raws)
+    # Additional lines to include 'year' column in the DataFrame
+    scd_weeks_raws['year'] = scd_weeks_raws['year'].astype(int)
+    
+    return scd_weeks_raws
+
+
+# def scd_weeks_group(scd_refine):
+#     scd_weeks_raws = scd_refine.groupby('week').agg({
+#         'domecasegap': ['max', 'min', 'mean', 'std'],
+#         'stitcharea': ['max', 'min', 'mean', 'std'],
+#     })
+
+#     # Rename the columns for clarity
+#     scd_weeks_raws.columns = [
+#         'maximum_domecasegap', 'minimum_domecasegap',\
+#         'domecasegap_week_mean', 'domecasegap_week_stddev', \
+#         'maximum_stitcharea', 'minimum_stitcharea',\
+#         'stitcharea_week_mean', 'stitcharea_week_stddev'
+#     ]
+#     # Add the 'week' column
+#     scd_weeks_raws['week'] = scd_weeks_raws.index
+#     # Perform the second aggregation using scd_refine DataFrame
+    
+#     scd_weeks_raws['stitcharea_week_mean'] = scd_refine.groupby('week')['stitcharea'].mean()
+#     scd_weeks_raws['stitcharea_week_stddev'] = scd_refine.groupby('week')['stitcharea'].std()
+#     scd_weeks_raws['domecasegap_week_mean'] = scd_refine.groupby('week')['domecasegap'].mean()
+#     scd_weeks_raws['domecasegap_week_stddev'] = scd_refine.groupby('week')['domecasegap'].std()
+#     scd_weeks_raws['maximum_domecasegap'] = scd_refine.groupby('week')['domecasegap'].max()
+#     scd_weeks_raws['minimum_domecasegap'] = scd_refine.groupby('week')['domecasegap'].min()
+#     scd_weeks_raws['maximum_stitcharea'] = scd_refine.groupby('week')['stitcharea'].max()
+#     scd_weeks_raws['minimum_stitcharea'] = scd_refine.groupby('week')['stitcharea'].min()
+
+#     return(scd_weeks_raws)
 
 def write_appended_hdfs(fname, df):
     fs = hdfs.HadoopFileSystem(
@@ -112,7 +135,7 @@ def write_appended_hdfs(fname, df):
             existing_df = pd.DataFrame()
 
         # Append new data to existing DataFrame
-        combined_df = existing_df.append(df, ignore_index=True)
+        combined_df = pd.concat([existing_df, df], ignore_index=True)
         json_data = combined_df.to_json()
     else:
         json_data = df.to_json()
@@ -169,6 +192,8 @@ for message in consumer:
         message_count += 1
 
     if file_size > 0 and message_count == file_size:
+        file_size = 0
+        message_count = 0
         # Convert the messages list to JSON objects
         json_messages = [json.loads(msg) for msg in messages]
 
@@ -186,10 +211,8 @@ for message in consumer:
                     print("scd_refine:")
                     print(scd_refine)   
                     print("scd_weeks_raws:")
-                    print(scd_weeks_raws)   
-                    
-                    
-                    break
+                    print(scd_weeks_raws)  
+                    #break
 
       # Print the running number on the same position
     else:
