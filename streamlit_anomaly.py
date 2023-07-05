@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import mplcursors
 import base64
 
-def spc_trend(df, feature, hi_limit, lo_limit, hi_value, lo_value):
+def anomaly_alerts(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_value=None):
     df = df.copy()  # Create a copy of the DataFrame to avoid modifying the original data
     window_size = 10
     sigma = 2
@@ -24,30 +24,50 @@ def spc_trend(df, feature, hi_limit, lo_limit, hi_value, lo_value):
     lo_spc = df['SPC_Lower'].mean()
     hi_spc = df['SPC_Upper'].mean()
 
-    # Find spc-alarm
-    if lo_value < lo_spc and hi_value > hi_spc:
-        trend = "Within SPC limits"
-        alarm = f"0:{trend}"
-    elif lo_value * 1.1 >= lo_spc or hi_value * 0.9 <= hi_spc:
-        trend = "Approaching SPC limits"
-        alarm = f"1:{trend}"
-    elif lo_value > lo_spc:
-        trend = "Below SPC limits"
-        alarm = f"2:{trend}"
-    elif hi_value > hi_spc:
-        trend = "Above SPC limits"
-        alarm = f"3:{trend}"
-    elif hi_value > hi_limit or lo_value < lo_limit:
-        trend = "Above limits"
-        alarm = f"4:{trend}"
-    else:
-        trend = "Unknown"
-        alarm = f"5:{trend}"
+    # Find spc-alarm and count occurrences
+    trend_counts = {
+        "Within SPC limits": 0,
+        "Approaching SPC limits": 0,
+        "Out of SPC limits": 0,
+        "Out of limits": 0,
+        "Within limits": 0,
+        "Unknown": 0
+    }
 
-    df['alarm'] = alarm
+    for index, row in df.iterrows():
+        if lo_value > lo_spc or hi_value < hi_spc:
+            trend = "Within SPC limits"
+            alarm = f"0:{trend}"
+            if lo_value * 1.1 < lo_spc or hi_value * 0.9 > hi_spc:
+                trend = "Approaching SPC limits"
+                alarm = f"1:{trend}"
+            trend_counts[trend] += 1
+        elif lo_value <= lo_spc or hi_value >= hi_spc:
+            trend = "Out of SPC limits"
+            alarm = f"2:{trend}"
+            if lo_value < lo_limit or hi_value > hi_limit:
+                trend = "Out of limits"
+                alarm = f"3:{trend}"
+            else:
+                trend = "Within limits"
+                alarm = f"0:{trend}"
+            trend_counts[trend] += 1
+        else:
+            trend = "Unknown"
+            alarm = f"5:{trend}"
+            trend_counts[trend] += 1
 
-    return df
+    # Aggregation visualization for 'trend' values
+    trend_labels = list(trend_counts.keys())
+    trend_values = list(trend_counts.values())
 
+    # Display the KPI counters
+    st.metric(label=trend_labels[0], value=trend_values[0])
+    st.metric(label=trend_labels[1], value=trend_values[1])
+    st.metric(label=trend_labels[2], value=trend_values[2])
+    st.metric(label=trend_labels[3], value=trend_values[3])
+    st.metric(label=trend_labels[4], value=trend_values[4])
+    st.metric(label=trend_labels[5], value=trend_values[5])
 
 def plot_spc_trend(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_value=None):
     df = df.copy()  # Create a copy of the DataFrame to avoid modifying the original data
@@ -75,73 +95,20 @@ def plot_spc_trend(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_
     hi_spc = df['SPC_Upper'].mean()
 
     # Add upper limit lines based on hi_avg, lo_avg, hi_spc, and lo_spc values
-    if hi_value is not None:
-        ax.axhline(y=hi_value, color='orange', linestyle='--', label='Hi')
-    if lo_value is not None:
-        ax.axhline(y=lo_value, color='purple', linestyle='--', label='Lo')
+    if hi_limit is not None:
+        ax.axhline(y=hi_limit, color='orange', linestyle='--', label='Hi')
+    if lo_limit is not None:
+        ax.axhline(y=lo_limit, color='purple', linestyle='--', label='Lo')
     if hi_spc is not None:
         ax.axhline(y=hi_spc, color='red', linestyle='--', label='Hi SPC')
     if lo_spc is not None:
         ax.axhline(y=lo_spc, color='blue', linestyle='--', label='Lo SPC')
+    
+    ax.legend()
 
-    trend_counts = {
-        "Within SPC limits": 0,
-        "Approaching SPC limits": 0,
-        "Below SPC limits": 0,
-        "Above SPC limits": 0,
-        "Above limits": 0,
-        "Unknown": 0
-    }
-
-    for index, row in df.iterrows():
-        if lo_value < lo_spc and hi_value > hi_spc:
-            trend = "Within SPC limits"
-            alarm = f"0:{trend}"
-        elif lo_value * 1.1 >= lo_spc or hi_value * 0.9 <= hi_spc:
-            trend = "Approaching SPC limits"
-            alarm = f"1:{trend}"
-        elif lo_value > lo_spc:
-            trend = "Below SPC limits"
-            alarm = f"2:{trend}"
-        elif hi_value > hi_spc:
-            trend = "Above SPC limits"
-            alarm = f"3:{trend}"
-        elif hi_value > hi_limit or lo_value < lo_limit:
-            trend = "Above limits"
-            alarm = f"4:{trend}"
-        else:
-            trend = "Unknown"
-            alarm = f"5:{trend}"
-
-    df.at[index, 'alarm'] = alarm
-    trend_counts[alarm.split(':')[1]] += 1
-
-    # Render the figure
-    st.pyplot(fig)
-
-    # Aggregation visualization for 'trend' values
-    trend_labels = list(trend_counts.keys())
-    trend_values = list(trend_counts.values())
-
-    # Create the bar chart
-    fig, ax = plt.subplots(figsize=(3, 3))
-    ax.bar(trend_labels, trend_values)
-
-    # Set the font size of the x-axis and y-axis labels
-    ax.set_xlabel('', fontsize=2)
-    ax.set_ylabel('Occurrences', fontsize=8)
-
-    # Set the font size of the title
-    ax.set_title('Anamalies counting', fontsize=8)
-
-    # Rotate x-axis labels for better visibility
-    plt.xticks(rotation=45,fontsize=8 )
-
-    # Display the chart using Streamlit
     st.pyplot(fig)
 
     return df
-
 
 def display_one_scd_anomaly(scd_anomaly):
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -208,7 +175,9 @@ def read_hdfs(file_path):
         return df
 
 def triger_alarm_table(df_row):
+    
     predicted_stitcharea = df_row['predicted_stitcharea_calculate']
+    predicted_week = df_row['pred_week']
     spc_lower_limit = df_row['spc_lower_limit']
     spc_upper_limit = df_row['spc_upper_limit']
     
@@ -217,10 +186,10 @@ def triger_alarm_table(df_row):
             # Compare the predicted stitch area to the SPC limits
                 is_alarm = (predicted_stitcharea < spc_lower_limit) | (predicted_stitcharea > spc_upper_limit)
                 if is_alarm.any():
-                    msg =f"Alarm: predicted_stitcharea {predicted_stitcharea:03f} is out of SPC limits {spc_lower_limit:03f}:{spc_upper_limit:03f}"
+                    msg =f"Alarm: predicted_stitcharea {predicted_stitcharea:03f} for week: {predicted_week} is out of SPC limits {spc_lower_limit:03f}: {spc_upper_limit:03f}"
                     df_row['alarm_pre_stitcharea'] = 1
                 else:
-                    msg =f"No Alarm: predicted_stitcharea {predicted_stitcharea:03f} is within SPC limits {spc_lower_limit:03f}:{spc_upper_limit:03f}"
+                    msg =f"No Alarm: predicted_stitcharea {predicted_stitcharea:03f} for week: {predicted_week} is within SPC limits {spc_lower_limit:03f}: {spc_upper_limit:03f}"
                     df_row['alarm_pre_stitcharea'] = 0
                 df_row['re-train_required'] = 0
         else:
@@ -229,8 +198,8 @@ def triger_alarm_table(df_row):
     else:
         msg="Need to have more data for prediction model training...."
         df_row['additional_recorrds_needed'] = 1
-        msg=('Need to have more data for prediction model training....')
-    return(msg)
+    return msg,df_row
+        
         
 # Read the image file
 with open('/home/naya/anomaly/architecture.PNG', 'rb') as file:
@@ -302,21 +271,18 @@ triger_alarm_tbl = read_hdfs(triger_alarm_table_path)
 scd_weeks_raws = read_hdfs(scd_weeks_raws_path)
 
 features = ["domecasegap", "stitcharea"]
-#scd_refine_first_row = scd_refine.iloc[0]  # Get the first row of scd_refine
 # Display the anomaly trends 
 for feature in features:
     # Set the value range for the feature
-    lo_value = scd_only_anomaly[feature].min()
-    hi_value = scd_only_anomaly[feature].max()
-
- 
+    lo_value_meas = scd_only_anomaly[feature].min()
+    hi_value_meas= scd_only_anomaly[feature].max()
     # Calculate the mean values for lo_limit and hi_limit
-    lo_limit_mean = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[0].strip()) if x.split(':')[0].strip() else 0).mean()
-    hi_limit_mean = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[1].strip()) if x.split(':')[1].strip() else 0).mean()  
- 
-    # Display the trend plot using mean values as limits and the 'lotnumber' column as the index
-    scd_only_anomaly_trend = plot_spc_trend(scd_only_anomaly, feature, hi_limit_mean, lo_limit_mean, hi_value, lo_value)
-# Display the anomaly plot
+    lo_limit = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[0].strip()) if x.split(':')[0].strip() else 0).mean()
+    hi_limit = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[1].strip()) if x.split(':')[1].strip() else 0).mean()  
+     # Display the trend plot using mean values as limits and the 'lotnumber' column as the index
+    scd_only_anomaly_trend = plot_spc_trend(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value_meas, lo_value_meas)
+    anomaly_alerts(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value_meas, lo_value_meas)
+ # Display the anomaly plot
 default_tp_cell_name = [11.0, 12.0]
 selected_lotnumber = st.selectbox('Show anomalies for the selected production Lot ID', [lotnumber for lotnumber in scd_anomaly['lotnumber'].unique() if len(scd_anomaly[scd_anomaly['lotnumber'] == lotnumber]) >= 800])
 selected_tp_cell_name = st.multiselect('Select Sealing Cell weling ID', default_tp_cell_name)
@@ -330,13 +296,13 @@ else:
     display_one_scd_anomaly(subset_scd_anomaly)
 
     # Show the plot
-    plt.show()
+    #plt.show()
     
 if len(triger_alarm_tbl) != 0:
     last_row = triger_alarm_tbl.iloc[len(triger_alarm_tbl)-1]
     st.markdown(f"#### {int(last_row['pred_year']):0d}, {int(last_row['pred_week']):0d} anomaly trend....")
     st.markdown(' ###### SealingCell welding:  ')
-    alarm_desc= triger_alarm_table(last_row)
+    alarm_desc, df_row =  triger_alarm_table(last_row)
     if last_row['alarm_pre_stitcharea'] !=0:
         alarm_color = 'red'
     else:
