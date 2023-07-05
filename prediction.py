@@ -103,20 +103,20 @@ def write_appended_hdfs(fname, df):
     # Write the appended DataFrame to HDFS
     with fs.open(file_path, 'wb') as f:
         f.write(appended_df.to_json().encode('utf-8'))
+
     
-def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_RECORD_value=20 , NEXT_TRAIN_QTY_value=100):
-    scd_refine_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_refine.json'
+def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_RECORD_value , NEXT_TRAIN_QTY_value):
     scd_weeks_raws_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_weeks_raws.json'
     scd_only_anomaly_trend_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_only_anomaly_trend.json'
 
     #year_value=print(datetime.now().year) 
-    scd_refine = read_hdfs(scd_refine_path)
     scd_weeks_raws = read_hdfs(scd_weeks_raws_path)
     scd_only_anomaly_trend = read_hdfs(scd_only_anomaly_trend_path)
     #assuming weekly new data row is appended to this data file 
     week_record = scd_weeks_raws.tail(1)
-    year_value = scd_refine['year'].values[0]+1 if week_record['week'].index[0] < 52 else  scd_refine['year'].values[0]
-    current_week_value = scd_refine['week'].values[0] 
+    print(week_record)
+    year_value = week_record['year'].values[0]+1 if week_record['week'].index[0] < 52 else  week_record['year'].values[0]
+    current_week_value = week_record['week'].values[0] 
     next_week_value = current_week_value + 1 if current_week_value < 52 else 1
     spc_lower_limit = scd_only_anomaly_trend[scd_only_anomaly_trend['week']==current_week_value]['SPC_Lower'].mean()
     spc_upper_limit = scd_only_anomaly_trend[scd_only_anomaly_trend['week']==current_week_value]['SPC_Upper'].mean()
@@ -136,6 +136,7 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
         'minimum_train_records_qty': MIN_PRED_RECORD_value
     })
     predicted_stitcharea = df_row['predicted_stitcharea_calculate'].values[0]
+    predicted_week = df_row['pred_week'].values[0]
     spc_lower_limit = df_row['spc_lower_limit'].values[0]
     spc_upper_limit = df_row['spc_upper_limit'].values[0]
     
@@ -144,10 +145,10 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
             # Compare the predicted stitch area to the SPC limits
                 is_alarm = (predicted_stitcharea < spc_lower_limit) | (predicted_stitcharea > spc_upper_limit)
                 if is_alarm.any():
-                    msg =f"Alarm: predicted_stitcharea {predicted_stitcharea:03f} is out of SPC limits {spc_lower_limit:03f}: {spc_upper_limit:03f}"
+                    msg =f"Alarm: predicted_stitcharea {predicted_stitcharea:03f} for week: {predicted_week} is out of SPC limits {spc_lower_limit:03f}: {spc_upper_limit:03f}"
                     df_row['alarm_pre_stitcharea'] = 1
                 else:
-                    msg =f"No Alarm: predicted_stitcharea {predicted_stitcharea} is within SPC limits {spc_lower_limit}: {spc_upper_limit}"
+                    msg =f"No Alarm: predicted_stitcharea {predicted_stitcharea:03f} for week: {predicted_week} is within SPC limits {spc_lower_limit:03f}: {spc_upper_limit:03f}"
                     df_row['alarm_pre_stitcharea'] = 0
                 df_row['re-train_required'] = 0
         else:
@@ -183,14 +184,14 @@ def read_model(path):
     return use_pred_MA_stitcharea, use_pred_STD_stitcharea
 
 
- 
+ # need to be run every week
 if __name__ == "__main__":
     triger_alarm_table_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/triger_alarm_table.json'
     # Create an argument parser
     parser = argparse.ArgumentParser()
     # Add the --history option
     parser.add_argument("--MIN_PRED_RECORD", type=int, default=20, help="Specify value that decide if trainer is valid")
-    parser.add_argument("--NEXT_TRAIN_QTY", type=int, default=100, help="Specify the value, when to activate the tranner model")
+    parser.add_argument("--NEXT_TRAIN_QTY", type=int, default=115, help="Specify the value, when to activate the tranner model")
     # Parse the command line arguments
     args = parser.parse_args() 
  
@@ -200,21 +201,20 @@ if __name__ == "__main__":
     path = 'hdfs://cnt7-naya-cdh63:8020/user/naya/anomaly/'
     scd_weeks_raws_file_path = (path + 'scd_weeks_raws.json')
 
- 
     scd_weeks_raws = read_hdfs(scd_weeks_raws_file_path)
-    print('MIN_PRED_RECORD = ', MIN_PRED_RECORD_value)
-    print('NEXT_TRAIN_QTY = ', NEXT_TRAIN_QTY_value)
-     
+        
     if len(scd_weeks_raws) >= MIN_PRED_RECORD_value:
         if len(scd_weeks_raws) >= NEXT_TRAIN_QTY_value:
-            pred_MA_stitcharea, pred_STD_stitcharea = prediction_train(scd_weeks_raws)
-            save_the_model(path,pred_MA_stitcharea, pred_STD_stitcharea)
-        else:
-            pred_MA_stitcharea, pred_STD_stitcharea = read_model(path)
-            msg,df_row = triger_alarm_table(pred_MA_stitcharea, pred_STD_stitcharea,MIN_PRED_RECORD_value,NEXT_TRAIN_QTY_value)
-            print(msg)
-            write_appended_hdfs('triger_alarm_table',df_row)
- 
+            #pred_MA_stitcharea, pred_STD_stitcharea = prediction_train(scd_weeks_raws)
+            #save_the_model(path,pred_MA_stitcharea, pred_STD_stitcharea)
+            NEXT_TRAIN_QTY_value =len(scd_weeks_raws)+12 #updated tto 12 weeks ahead to next
+        
+        NEXT_TRAIN_QTY_default = NEXT_TRAIN_QTY_value
+        pred_MA_stitcharea, pred_STD_stitcharea = read_model(path)
+        msg,df_row = triger_alarm_table(pred_MA_stitcharea, pred_STD_stitcharea,MIN_PRED_RECORD_value,NEXT_TRAIN_QTY_value)
+        print(msg)
+        write_appended_hdfs('triger_alarm_table',df_row)
+    
     else:
         print("not enought records to train....")
     
