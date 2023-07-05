@@ -157,7 +157,6 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
     else:
         msg="Need to have more data for prediction model training...."
         df_row['additional_recorrds_needed'] = 1
-        msg=('Need to have more data for prediction model training....')
     return msg,df_row
         
     
@@ -191,7 +190,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # Add the --history option
     parser.add_argument("--MIN_PRED_RECORD", type=int, default=20, help="Specify value that decide if trainer is valid")
-    parser.add_argument("--NEXT_TRAIN_QTY", type=int, default=115, help="Specify the value, when to activate the tranner model")
+    parser.add_argument("--NEXT_TRAIN_QTY", type=int, default=130, help="Specify the value, when to activate the tranner model")
     # Parse the command line arguments
     args = parser.parse_args() 
  
