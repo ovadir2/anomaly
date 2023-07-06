@@ -56,11 +56,28 @@ def sealing_cell_data_refining(json_messages):
     
     return scd_anomaly, scd_refine
 
+def read_hdfs(file_path):
+    fs = hdfs.HadoopFileSystem(
+        host='Cnt7-naya-cdh63',
+        port=8020,
+        user='hdfs',
+        kerb_ticket=None,
+        extra_conf=None
+    )
+
+    if fs.exists(file_path):
+        with fs.open(file_path, 'rb') as f:
+            json_bytes = f.read()
+            json_str = json_bytes.decode('utf-8')
+            df = pd.read_json(json_str)
+            return df
+    else:
+        return pd.DataFrame()
+
 def scd_weeks_group(scd_refine):
     scd_weeks_raws = scd_refine.groupby(['year', 'week']).agg({
-        'domecasegap': ['max', 'min', 'mean', 'std'],
-        'stitcharea': ['max', 'min', 'mean', 'std'],
-    })
+    'domecasegap': ['max', 'min', 'mean', 'std'],
+    'stitcharea': ['max', 'min', 'mean', 'std']})
 
     # Rename the columns for clarity
     scd_weeks_raws.columns = [
@@ -77,35 +94,6 @@ def scd_weeks_group(scd_refine):
     scd_weeks_raws['year'] = scd_weeks_raws['year'].astype(int)
     
     return scd_weeks_raws
-
-
-# def scd_weeks_group(scd_refine):
-#     scd_weeks_raws = scd_refine.groupby('week').agg({
-#         'domecasegap': ['max', 'min', 'mean', 'std'],
-#         'stitcharea': ['max', 'min', 'mean', 'std'],
-#     })
-
-#     # Rename the columns for clarity
-#     scd_weeks_raws.columns = [
-#         'maximum_domecasegap', 'minimum_domecasegap',\
-#         'domecasegap_week_mean', 'domecasegap_week_stddev', \
-#         'maximum_stitcharea', 'minimum_stitcharea',\
-#         'stitcharea_week_mean', 'stitcharea_week_stddev'
-#     ]
-#     # Add the 'week' column
-#     scd_weeks_raws['week'] = scd_weeks_raws.index
-#     # Perform the second aggregation using scd_refine DataFrame
-    
-#     scd_weeks_raws['stitcharea_week_mean'] = scd_refine.groupby('week')['stitcharea'].mean()
-#     scd_weeks_raws['stitcharea_week_stddev'] = scd_refine.groupby('week')['stitcharea'].std()
-#     scd_weeks_raws['domecasegap_week_mean'] = scd_refine.groupby('week')['domecasegap'].mean()
-#     scd_weeks_raws['domecasegap_week_stddev'] = scd_refine.groupby('week')['domecasegap'].std()
-#     scd_weeks_raws['maximum_domecasegap'] = scd_refine.groupby('week')['domecasegap'].max()
-#     scd_weeks_raws['minimum_domecasegap'] = scd_refine.groupby('week')['domecasegap'].min()
-#     scd_weeks_raws['maximum_stitcharea'] = scd_refine.groupby('week')['stitcharea'].max()
-#     scd_weeks_raws['minimum_stitcharea'] = scd_refine.groupby('week')['stitcharea'].min()
-
-#     return(scd_weeks_raws)
 
 def write_appended_hdfs(fname, df):
     fs = hdfs.HadoopFileSystem(
@@ -200,11 +188,25 @@ for message in consumer:
         # Apply data refining function
         scd_anomaly, scd_refine = sealing_cell_data_refining(json_messages)
         write_hdfs('scd_refine',scd_refine)
-
+        
         scd_weeks_raws = scd_weeks_group(scd_refine)
-        
-        write_appended_hdfs('scd_weeks_raws', scd_weeks_raws)
-        
+        scd_weeks_raws_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_weeks_raws.json'
+        read_scd_weeks_raws = read_hdfs(scd_weeks_raws_path)
+        if not read_scd_weeks_raws.empty:
+            read_scd_weeks_raws['year'] = read_scd_weeks_raws['year'].astype(int)
+            read_scd_weeks_raws['week'] = read_scd_weeks_raws['week'].astype(int)
+
+            # Check if year and week already exist before updating
+            if any((entry['year'] == row['year'] and entry['week'] == row['week']) for entry in read_scd_weeks_raws.to_dict('records') for row in scd_weeks_raws.to_dict('records')):
+                print("Year and week combination already exists. Skipping write operation.")
+            else:
+                # Check if year and week already exist before updating
+                print("Year and week combination new. write the new week raw")
+                write_appended_hdfs('scd_weeks_raws', scd_weeks_raws)
+        else:
+            write_appended_hdfs('scd_weeks_raws', scd_weeks_raws)
+
+
         if __name__ == '__main__':
                     print("scd_anomaly:")
                     print(scd_anomaly)

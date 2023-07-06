@@ -7,12 +7,14 @@ import pyarrow.hdfs as hdfs
 import matplotlib.pyplot as plt
 import mplcursors
 import base64
+import pickle
+import litelearn as ll
 
 def anomaly_alerts(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_value=None):
     df = df.copy()  # Create a copy of the DataFrame to avoid modifying the original data
     window_size = 10
     sigma = 2
-
+    print(df)
     # Compute moving average and standard deviation
     df['MA'] = df[feature].rolling(window=window_size, min_periods=1).mean()
     df['STD'] = df[feature].rolling(window=window_size, min_periods=1).std()
@@ -31,8 +33,7 @@ def anomaly_alerts(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_
         "Out of SPC limits": 0,
         "Out of limits": 0,
         "Within limits": 0,
-        "Unknown": 0
-    }
+        }
 
     for index, row in df.iterrows():
         if lo_value > lo_spc or hi_value < hi_spc:
@@ -52,22 +53,32 @@ def anomaly_alerts(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_
                 trend = "Within limits"
                 alarm = f"0:{trend}"
             trend_counts[trend] += 1
-        else:
-            trend = "Unknown"
-            alarm = f"5:{trend}"
-            trend_counts[trend] += 1
+        index +=1
+        print(f"{index}", end='\r')
 
     # Aggregation visualization for 'trend' values
     trend_labels = list(trend_counts.keys())
     trend_values = list(trend_counts.values())
 
-    # Display the KPI counters
-    st.metric(label=trend_labels[0], value=trend_values[0])
-    st.metric(label=trend_labels[1], value=trend_values[1])
-    st.metric(label=trend_labels[2], value=trend_values[2])
-    st.metric(label=trend_labels[3], value=trend_values[3])
-    st.metric(label=trend_labels[4], value=trend_values[4])
-    st.metric(label=trend_labels[5], value=trend_values[5])
+    data = {
+        'label': trend_labels,
+        'value': trend_values
+    }
+    df = pd.DataFrame(data)
+    # Transpose the DataFrame
+    df_transposed = df.T
+    # Display the DataFrame in Streamlit
+    df_transposed['Total'] = index
+
+    st.dataframe(df_transposed)
+ 
+    # # Display the KPI counters
+    # st.metric(label=trend_labels[0], value=trend_values[0])
+    # st.metric(label=trend_labels[1], value=trend_values[1])
+    # st.metric(label=trend_labels[2], value=trend_values[2])
+    # st.metric(label=trend_labels[3], value=trend_values[3])
+    # st.metric(label=trend_labels[4], value=trend_values[4])
+    # st.metric(label=trend_labels[5], value=trend_values[5])
 
 def plot_spc_trend(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_value=None):
     df = df.copy()  # Create a copy of the DataFrame to avoid modifying the original data
@@ -111,6 +122,7 @@ def plot_spc_trend(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_
     return df
 
 def display_one_scd_anomaly(scd_anomaly):
+    print(scd_anomaly)
     fig, ax = plt.subplots(figsize=(8, 6))
 
     scatter = sns.scatterplot(data=scd_anomaly, x='stitcharea', y='domecasegap', hue='anomaly', palette=['black', 'orange'], alpha=0.5, ax=ax)
@@ -199,8 +211,40 @@ def triger_alarm_table(df_row):
         msg="Need to have more data for prediction model training...."
         df_row['additional_recorrds_needed'] = 1
     return msg,df_row
-        
-        
+    
+def read_model(path):
+    print("Using existing model...")
+    fs = hdfs.HadoopFileSystem(
+        host='Cnt7-naya-cdh63',
+        port=8020,
+        user='hdfs',
+        kerb_ticket=None,
+        extra_conf=None
+    )
+    
+    try:
+        fs.mkdir(path)
+    except FileExistsError:
+        pass  # Directory already exists, no need to create it
+   
+    with fs.open(path+'pred_MA_stitcharea.bin', 'rb') as f2:
+       use_pred_MA_stitcharea = pickle.load(f2)
+    with fs.open(path + 'pred_STD_stitcharea.bin', 'rb') as f2:
+        use_pred_STD_stitcharea = pickle.load(f2)
+    
+    return use_pred_MA_stitcharea, use_pred_STD_stitcharea      
+
+def model_evaluation_plot(pred_MA_stitcharea, pred_STD_stitcharea):
+    pred_STD_stitcharea.get_evaluation()
+    pred_MA_stitcharea.display_residuals()
+    pred_MA_stitcharea.display_shap()
+    pred_STD_stitcharea.display_shap()
+
+
+
+
+
+
 # Read the image file
 with open('/home/naya/anomaly/architecture.PNG', 'rb') as file:
     image_data = file.read()
@@ -270,49 +314,55 @@ scd_refine = read_hdfs(scd_refine_path)
 triger_alarm_tbl = read_hdfs(triger_alarm_table_path)
 scd_weeks_raws = read_hdfs(scd_weeks_raws_path)
 
-features = ["domecasegap", "stitcharea"]
-# Display the anomaly trends 
-for feature in features:
-    # Set the value range for the feature
-    lo_value_meas = scd_only_anomaly[feature].min()
-    hi_value_meas= scd_only_anomaly[feature].max()
-    # Calculate the mean values for lo_limit and hi_limit
-    lo_limit = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[0].strip()) if x.split(':')[0].strip() else 0).mean()
-    hi_limit = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[1].strip()) if x.split(':')[1].strip() else 0).mean()  
-     # Display the trend plot using mean values as limits and the 'lotnumber' column as the index
-    scd_only_anomaly_trend = plot_spc_trend(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value_meas, lo_value_meas)
-    anomaly_alerts(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value_meas, lo_value_meas)
- # Display the anomaly plot
-default_tp_cell_name = [11.0, 12.0]
-selected_lotnumber = st.selectbox('Show anomalies for the selected production Lot ID', [lotnumber for lotnumber in scd_anomaly['lotnumber'].unique() if len(scd_anomaly[scd_anomaly['lotnumber'] == lotnumber]) >= 800])
-selected_tp_cell_name = st.multiselect('Select Sealing Cell weling ID', default_tp_cell_name)
 
-if not selected_tp_cell_name:
+# Display the anomaly plot
+default_tp_cell_name = [11.0, 12.0]
+#selected_lotnumber = st.selectbox('Show anomalies for the selected production Lot ID', [lotnumber for lotnumber in scd_anomaly['lotnumber'].unique() if len(scd_anomaly[scd_anomaly['lotnumber'] == lotnumber]) >= 800])
+selected_week = st.selectbox('Show anomalies for the selected production week', [week for week in scd_anomaly['week'].unique() if len(scd_anomaly[scd_anomaly['week'] == week]) >= 800])
+if not selected_week:
+    selected_week = '2'
+    selected_tp_cell_name = st.multiselect('Select Sealing Cell weling ID', default_tp_cell_name)
     st.warning('Please select at least one TP Cell Name.')
 else:
-     # Filter the DataFrame based on the selected lot number and TP Cell Name
-    subset_scd_anomaly = scd_anomaly[(scd_anomaly['lotnumber'] == selected_lotnumber) & (scd_anomaly['tp_cell_name'].isin(selected_tp_cell_name))]
+    selected_tp_cell_name = default_tp_cell_name
+    #filtering By Week
+    subset_scd_anomaly = scd_anomaly[(scd_anomaly['week'] == selected_week) & (scd_anomaly['tp_cell_name'].isin(selected_tp_cell_name))]
     # Display the scatter plot for the selected lot number and TP Cell Name
     display_one_scd_anomaly(subset_scd_anomaly)
 
-    # Show the plot
-    #plt.show()
-    
-if len(triger_alarm_tbl) != 0:
-    last_row = triger_alarm_tbl.iloc[len(triger_alarm_tbl)-1]
-    st.markdown(f"#### {int(last_row['pred_year']):0d}, {int(last_row['pred_week']):0d} anomaly trend....")
-    st.markdown(' ###### SealingCell welding:  ')
-    alarm_desc, df_row =  triger_alarm_table(last_row)
-    if last_row['alarm_pre_stitcharea'] !=0:
-        alarm_color = 'red'
+    # Display the anomaly trends 
+    features = ["domecasegap", "stitcharea"]
+    for feature in features:
+        # Set the value range for the feature
+        lo_value_meas = scd_only_anomaly[feature].min()
+        hi_value_meas= scd_only_anomaly[feature].max()
+        # Calculate the mean values for lo_limit and hi_limit
+        lo_limit = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[0].strip()) if x.split(':')[0].strip() else 0).mean()
+        hi_limit = scd_refine[f'{feature}_limit'].apply(lambda x: float(x.split(':')[1].strip()) if x.split(':')[1].strip() else 0).mean()  
+        # Display the trend plot using mean values as limits 
+        scd_only_anomaly_trend = plot_spc_trend(subset_scd_anomaly, feature, hi_limit, lo_limit, hi_value_meas, lo_value_meas)
+        anomaly_alerts(subset_scd_anomaly, feature, hi_limit, lo_limit, hi_value_meas, lo_value_meas)
+ 
+     #prediction alarmming        
+    if len(triger_alarm_tbl) != 0:
+        last_row = triger_alarm_tbl.iloc[len(triger_alarm_tbl)-1]
+        st.markdown(f"#### {int(last_row['pred_year']):0d}, {int(last_row['pred_week']):0d} anomaly trend....")
+        st.markdown(' ###### SealingCell welding:  ')
+        alarm_desc, df_row =  triger_alarm_table(last_row)
+        if last_row['alarm_pre_stitcharea'] !=0:
+            alarm_color = 'red'
+        else:
+            alarm_color = 'green'
     else:
-        alarm_color = 'green'
-else:
-    alarm_color = 'yellow'
+        alarm_color = 'yellow'
 
-st.markdown(f'<p style="color:{alarm_color}">{alarm_desc}</p>', unsafe_allow_html=True)
+    st.markdown(f'<p style="color:{alarm_color}">{alarm_desc}</p>', unsafe_allow_html=True)
 
-#add prediction performance
-
+# if st.button('Prediction Model Performance'):
+#     # Button is clicked
+#     path = 'hdfs://cnt7-naya-cdh63:8020/user/naya/anomaly/'
+#     pred_MA_stitcharea, pred_STD_stitcharea = read_model(path)
+#     model_evaluation_plot(pred_MA_stitcharea, pred_STD_stitcharea)
+    
 
 

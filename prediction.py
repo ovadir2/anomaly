@@ -1,5 +1,6 @@
 import seaborn as sns
 import pyarrow.hdfs as hdfs
+#import pyarrow.fs as hdfs
 import pandas as pd
 import litelearn
 import pickle
@@ -17,11 +18,14 @@ def read_hdfs(file_path):
         extra_conf=None
     )
 
-    with fs.open(file_path, 'rb') as f:
-        json_bytes = f.read()
-        json_str = json_bytes.decode('utf-8')
-        df = pd.read_json(json_str)
-    return df
+    if fs.exists(file_path):
+        with fs.open(file_path, 'rb') as f:
+            json_bytes = f.read()
+            json_str = json_bytes.decode('utf-8')
+            df = pd.read_json(json_str)
+            return df
+    else:
+        return pd.DataFrame()
 
 def prediction_train(scd_weeks_raws):
         print("Trainning the model")
@@ -35,11 +39,6 @@ def prediction_train(scd_weeks_raws):
         pred_STD_stitcharea = litelearn.regress_df(train, 'stitcharea_week_stddev') 
         return pred_MA_stitcharea, pred_STD_stitcharea
 
-def model_evaluation_plot(pred_MA_stitcharea, pred_STD_stitcharea):
-    pred_STD_stitcharea.get_evaluation()
-    pred_MA_stitcharea.display_residuals()
-    pred_MA_stitcharea.display_shap()
-    pred_STD_stitcharea.display_shap()
     
 def train_valdation(pred_MA_stitcharea, pred_STD_stitcharea):
     print("Validation... checking ")
@@ -112,14 +111,19 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
     #year_value=print(datetime.now().year) 
     scd_weeks_raws = read_hdfs(scd_weeks_raws_path)
     scd_only_anomaly_trend = read_hdfs(scd_only_anomaly_trend_path)
+    if not scd_weeks_raws.any or not scd_only_anomaly_trend.any:
+        print("scd_weeks_raws or scd_only_anomaly_trend not exist")
+        return "ERROR",pd.DataFrame()
     #assuming weekly new data row is appended to this data file 
     week_record = scd_weeks_raws.tail(1)
     print(week_record)
     year_value = week_record['year'].values[0]+1 if week_record['week'].index[0] < 52 else  week_record['year'].values[0]
     current_week_value = week_record['week'].values[0] 
     next_week_value = current_week_value + 1 if current_week_value < 52 else 1
-    spc_lower_limit = scd_only_anomaly_trend[scd_only_anomaly_trend['week']==current_week_value]['SPC_Lower'].mean()
-    spc_upper_limit = scd_only_anomaly_trend[scd_only_anomaly_trend['week']==current_week_value]['SPC_Upper'].mean()
+    # spc_lower_limit = scd_only_anomaly_trend[scd_only_anomaly_trend['week']==current_week_value]['SPC_Lower'].iloc[0]
+    # spc_upper_limit = scd_only_anomaly_trend[scd_only_anomaly_trend['week']==current_week_value]['SPC_Upper'].iloc[0]
+    spc_lower_limit = current_week_value['SPC_Lower'].values[0]
+    spc_upper_limit = current_week_value['SPC_Upper'].values[0]
     df_row = pd.DataFrame({
         'week': current_week_value,
         'pred_year': year_value,
@@ -141,6 +145,7 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
     spc_upper_limit = df_row['spc_upper_limit'].values[0]
     
     if len(scd_weeks_raws) > df_row['minimum_train_records_qty'].iloc[0]:
+        print(len(scd_weeks_raws), df_row['next_retraining_and_assigned'].iloc[0])
         if len(scd_weeks_raws) < df_row['next_retraining_and_assigned'].iloc[0]:
             # Compare the predicted stitch area to the SPC limits
                 is_alarm = (predicted_stitcharea < spc_lower_limit) | (predicted_stitcharea > spc_upper_limit)
@@ -150,7 +155,6 @@ def triger_alarm_table(use_pred_MA_stitcharea, use_pred_STD_stitcharea,MIN_PRED_
                 else:
                     msg =f"No Alarm: predicted_stitcharea {predicted_stitcharea:03f} for week: {predicted_week} is within SPC limits {spc_lower_limit:03f}: {spc_upper_limit:03f}"
                     df_row['alarm_pre_stitcharea'] = 0
-                df_row['re-train_required'] = 0
         else:
             msg ="Need to re-train the data....."
             df_row['re-train_required'] = 1
@@ -212,8 +216,28 @@ if __name__ == "__main__":
         pred_MA_stitcharea, pred_STD_stitcharea = read_model(path)
         msg,df_row = triger_alarm_table(pred_MA_stitcharea, pred_STD_stitcharea,MIN_PRED_RECORD_value,NEXT_TRAIN_QTY_value)
         print(msg)
-        write_appended_hdfs('triger_alarm_table',df_row)
-    
+        
+        read_triger_alarm_table_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/triger_alarm_table.json'
+        read_triger_alarm_table = read_hdfs(triger_alarm_table_path)
+        if read_triger_alarm_table.empty:
+                        write_appended_hdfs('triger_alarm_table', df_row)
+        else:
+            # read_triger_alarm_table['pred_year'] = read_triger_alarm_table['pred_year'].astype(int)
+            # read_triger_alarm_table['pred_week'] = read_triger_alarm_table['pred_week'].astype(int)
+
+            # Check if year and week already exist before updating
+            skip_write = False
+            for index, row in read_triger_alarm_table.iterrows():
+                if (int(row['pred_year'])== df_row['pred_year'].values[0]) and (int(row['pred_week']) == df_row['pred_week'].values[0]):
+                    skip_write = True
+                    break
+
+            if skip_write:
+                print("Year and week combination already exists. Skipping write operation.")
+            else:
+                print("Year and week combination new. write the new raw.")
+                write_appended_hdfs('triger_alarm_table', df_row)
+
     else:
         print("not enought records to train....")
     
