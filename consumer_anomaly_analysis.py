@@ -57,7 +57,7 @@ def sealing_cell_data_refining(json_messages):
     df['test_time_sec'] = in_minutes * 60    # Calculate the required statistics
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     
-    columns_to_keep = ['week','batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit','domecasegap_spc',\
+    columns_to_keep = ['week', 'year','batchid', 'tp_cell_name', 'blister_id', 'domecasegap', 'domecasegap_limit','domecasegap_spc',\
                     'stitcharea','stitcharea_limit','stitcharea_spc', \
                     'minstitchwidth', 'bodytypeid', 'dometypeid', 'leaktest', 'laserpower', 'lotnumber',\
                     'test_time_sec', 'date', 'error_code_number', 'pass_failed']
@@ -78,7 +78,7 @@ def sealing_cell_data_refining(json_messages):
 def check_anomalies(scd_anomaly, contamination=0.05, n_estimators=100):
     # Adjust the contamination value and number of estimators
     isolation_forest = IsolationForest(contamination=contamination, n_estimators=n_estimators)
-    # Fit the model to the data
+    # Fit the model to the dat
     isolation_forest.fit(scd_anomaly)
 
     # Predict the anomalies in the data
@@ -124,7 +124,26 @@ def spc_trend(df, feature, hi_limit=None, lo_limit=None, hi_value=None, lo_value
     df['alarm'] = alarm
 
     return df
-    
+
+def read_hdfs(file_path):
+    fs = hdfs.HadoopFileSystem(
+        host='Cnt7-naya-cdh63',
+        port=8020,
+        user='hdfs',
+        kerb_ticket=None,
+        extra_conf=None
+    )
+
+    if fs.exists(file_path):
+        with fs.open(file_path, 'rb') as f:
+            json_bytes = f.read()
+            json_str = json_bytes.decode('utf-8')
+            df = pd.read_json(json_str)
+            return df
+    else:
+        return pd.DataFrame()
+
+
 # Create the Kafka consumer
 consumer = KafkaConsumer(
     topic,
@@ -184,7 +203,22 @@ for message in consumer:
 
                 # Display the trend plot
                 scd_only_anomaly_trend = spc_trend(scd_only_anomaly, feature, hi_limit, lo_limit, hi_value, lo_value)
-                write_hdfs('scd_only_anomaly_trend',scd_only_anomaly_trend)
+                
+                read_scd_only_anomaly_trend_path = 'hdfs://Cnt7-naya-cdh63:8020/user/naya/anomaly/scd_only_anomaly_trend.json'
+                read_scd_only_anomaly_trend = read_hdfs(read_scd_only_anomaly_trend_path)
+                if not read_scd_only_anomaly_trend.empty:
+                    read_scd_only_anomaly_trend['year'] = read_scd_only_anomaly_trend['year'].astype(int)
+                    read_scd_only_anomaly_trend['week'] = read_scd_only_anomaly_trend['week'].astype(int)
+                    # Check if year and week already exist before updating
+                    if any((entry['year'] == row['year'] and entry['week'] == row['week']) for entry in scd_only_anomaly_trend.to_dict('records') for row in read_scd_only_anomaly_trend.to_dict('records')):
+                        print("Year and week combination already exists. Skipping write operation.")
+                    else:
+                        # Check if year and week already exist before updating
+                        print("Year and week combination new. write to HDFS")
+                        write_hdfs('scd_only_anomaly_trend',scd_only_anomaly_trend)
+                else:
+                    write_hdfs('scd_only_anomaly_trend',scd_only_anomaly_trend)
+  
         if __name__ == '__main__':
             print(scd_anomaly)
             print(scd_refine)  
